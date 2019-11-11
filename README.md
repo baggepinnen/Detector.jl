@@ -21,8 +21,6 @@ All functionality in this package operates on serialized, preprocessed data file
 using Detector, LazyWAVFiles, Dates
 readpath = "path/to/folder/with/wavfiles"
 savepath = "path/to/store/files"
-readpath = "/media/fredrikb/storage/crocs/20190821/"
-savepath = "/home/fredrikb/arl/crocs_processed/"
 df       = DistributedWAVFile(readpath)
 serializeall_raw(savepath, df)    # Serializes raw audio waveforms, for autoencoding
 ```
