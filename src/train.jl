@@ -41,16 +41,15 @@ function train(model, dataset)
         sum(abs.(Xh.-X)) * 1 // length(X)
     end
     n_params = sum(length, pars)
-    opt = gpu(ADAM(0.001))
-    opt2 = gpu(ADAM(0.001))
+    opt = gpu(ADAM(0.002))
+    opt2 = gpu(ADAM(0.002))
     losses = Float32[]
 
-    # gr()
-    function train_inner(loss, opt, pars, dataset)
-        ps = Flux.Params(pars)
+    ps = Flux.params(model)
+    for i = 1:10
         Flux.testmode!(model, false)
         L = 0f0
-        Juno.@progress for (i, (x,_)) in enumerate(dataset)
+        Juno.@progress for (i, (x,_)) in enumerate(bw)
             gs = Flux.gradient(ps) do
                 # @show l = ls_loss(x)
                 l = loss(x)
@@ -67,11 +66,17 @@ function train(model, dataset)
                 plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss") |> display
             end
         end
-        # push!(losses, L/length(dataset))
+        # push!(losses, L/length(bw))
         Flux.testmode!(model, true)
-    end
-end
 
-train_inner(loss, opt, Flux.params(model), bw)
-losses
+        if i % 1  == 0
+            opt.eta *= 0.95
+            CuArrays.reclaim(true)
+            serialize("$(Dates.now())_$(length(losses)).bin", (cpu(model), opt, losses))
+            any(isfinite, losses) && plot(losses, yscale=:log10, legend=false) |> display
+            sleep(0.1)
+        end
+    end
+
+    losses
 end

@@ -30,15 +30,18 @@ autoencode(mode,x::Array, sparsify=true) = decode(model,encode(model, gpu(x), sp
 #                 Conv((7,1), 1k=>1k, relu, pad=(3,0)),
 #                 Conv((7,1), 1k=>1,        pad=(3,0))
 #                 )
-model = Chain(
-                Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
-                Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
-                Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
-                Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
-                Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
-                ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
-                ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=2),
-                ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
-                ConvTranspose((11,1),  1k=>1k, leakyrelu, pad=(0,0)),
-                ConvTranspose((24,1),  1k=>1,            pad=(0,0)),
-                ) |> gpu
+function __init__()
+    # The model definition must be done at init time since it contains pointers to CuArrays on the GPU, ref https://github.com/JuliaPy/PyCall.jl#using-pycall-from-julia-modules
+    global model = Chain(
+                    Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
+                    Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
+                    Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+                    Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+                    Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
+                    ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
+                    ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=2),
+                    ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+                    ConvTranspose((11,1),  1k=>1k, leakyrelu, pad=(0,0)),
+                    ConvTranspose((24,1),  1k=>1,            pad=(0,0)),
+                    ) |> gpu
+end
