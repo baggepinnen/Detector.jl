@@ -1,7 +1,10 @@
 A package for detecting weird stuff in long acoustic recordings using a sparse autoencoder on raw audio data.
 # Installation
+This package requires a working Julia GPU environment. Follow instructions at [CuArrays.jl](https://github.com/JuliaGPU/CuArrays.jl/)
 
+After that, install this package like this:
 ```julia
+cd(@__DIR__)
 using Pkg
 Pkg.add("https://github.com/baggepinnen/DiskDataProviders.jl")
 Pkg.add("url/to/this/repo")
@@ -21,12 +24,14 @@ All functionality in this package operates on serialized, preprocessed data file
 using Detector, LazyWAVFiles, Dates
 readpath = "path/to/folder/with/wavfiles"
 savepath = "path/to/store/files"
+readpath = "/media/fredrikb/storage/crocs/20190821/"
+savepath = "/home/fredrikb/arl/crocs_processed/"
 df       = DistributedWAVFile(readpath)
 serializeall_raw(savepath, df)    # Serializes raw audio waveforms, for autoencoding
 ```
 
 ## Create a dataset
-
+For further help using [DiskDataProviders](https://github.com/baggepinnen/DiskDataProviders.jl), see its [documentation]((https://baggepinnen.github.io/DiskDataProviders.jl/latest))
 ```julia
 using DiskDataProviders, MLDataUtils, Flux
 
@@ -58,14 +63,14 @@ Detector.train(model, dataset) # Perform one epoch of training. This will take a
 
 ## Detection using feature activations
 ```julia
+using Peaks
 model = Detector.load_model() # Load pre-trained model from disk
 errors = reconstruction_errors(model, dataset) # This will take a long time (2-5 minutes) if done on the entire dataset
-plot(errors)
-error_ranks = sortperm(errors, rev=true)
-most_errors = error_ranks[1:50]
-save_interesting(dataset, most_errors, contextwindow=1) # This will save the interesting clips to a folder on disk
+m,proms = peakprom(errors, Maxima(),100) # Find peaks in signal
+plot(errors);scatter!(m,errors[m], m=(:red, 3), ylabel="Errors", legend=false)
+save_interesting(dataset, m, contextwindow=1) # This will save the interesting clips to a folder on disk
 ```
-
+![window](figs/peaks.png)
 
 ## Detection using reconstruction errors
 ```julia

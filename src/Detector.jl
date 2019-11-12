@@ -9,7 +9,7 @@ export save_interesting, feature_activations, reconstruction_errors
 
 
 include("mel.jl")
-export melspectrogram, mfcc
+export melspectrogram, mfcc, mel
 
 include("utils.jl")
 export pool, bp_filter, rocplot, filterplot, confusplot, to2, to4, flatten, typicalinput
@@ -58,7 +58,7 @@ end
 nf = second÷5
 const errorf = gpu(MeanPool((nf,1)))
 function reconstruction_errors(model, dataset)
-    reconstruction_errors = map(take(dataset, 20000)) do x
+    map(dataset) do x
         CuArrays.reclaim(true)
         X = gpu(x[:,:,:,:])
         ae = abs.(X - autoencode(model,X,false)) |> Flux.data
