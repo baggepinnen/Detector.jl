@@ -7,8 +7,8 @@ After that, install this package like this:
 cd(@__DIR__)
 using Pkg
 Pkg.add("https://github.com/baggepinnen/DiskDataProviders.jl")
-Pkg.add("url/to/this/repo")
-cd("url/to/this/repo")
+Pkg.add("https://github.com/baggepinnen/Detector.jl")
+cd("path/to/this/repo")
 Pkg.instantiate()
 using Detector
 ```
@@ -57,7 +57,7 @@ x,y = first(bw)
 using Flux, BSON
 model = Detector.model
 Detector.encode(model,x) # This will give you the latent channels of x
-Detector.train(model, dataset) # Perform one epoch of training. This will take a long time, some figure will be displayed every now and then. This command can be executed several times
+Detector.train(model, batchview(dataset), epochs=10) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```
 

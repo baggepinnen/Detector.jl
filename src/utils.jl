@@ -196,7 +196,7 @@ function removegpu(model)
 end
 # @time plotgrad(datasetvc[1][1][:,:,:,3:3])
 # imgg = imfilter(img, Kernel.gaussian(3));
-using ImageFiltering
+
 imf(x, s=2) = imfilter(x, Kernel.gaussian(s))
 function imf(x::CuArray, s=2)
     k = Kernel.gaussian(s)

@@ -2,8 +2,8 @@ module Detector
 using Statistics, LinearAlgebra, Serialization
 using Base.Threads: @threads, nthreads, threadid, @spawn
 using Base.Iterators
-using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno
-
+using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno, NNlib
+using ImageFiltering # Used in utils
 
 export save_interesting, feature_activations, reconstruction_errors
 
@@ -23,7 +23,7 @@ include("train.jl")
 
 
 function load_model()
-    global model = BSON.load("../detector.bson")[:model] |> gpu
+    global model = BSON.load(joinpath(@__DIR__(),"../detector.bson"))[:model] |> gpu
 end
 
 
@@ -46,9 +46,9 @@ function save_interesting(dataset, inds::Vector{Int}; contextwindow=1)
 end
 
 
-function feature_activations(model, dataset)
+function feature_activations(model, dataset; sparsify=false)
     F = map(dataset) do x
-        Z = encode(model, x[:,:,:,:], false)
+        Z = encode(model, x[:,:,:,:], sparsify)
         feature_activations = mapslices(norm, Z, dims=(1,2)) |> vec
     end
     reduce(hcat, F)
@@ -57,15 +57,25 @@ end
 
 nf = second÷5
 const errorf = gpu(MeanPool((nf,1)))
-function reconstruction_errors(model, dataset)
+function reconstruction_errors(model, dataset; sparsify=false)
     map(dataset) do x
         CuArrays.reclaim(true)
         X = gpu(x[:,:,:,:])
-        ae = abs.(X - autoencode(model,X,false)) |> Flux.data
-        ae = errorf(ae)
+        ae = abs.(X - autoencode(model,X,sparsify)) |> Flux.data
+        try
+            ae = errorf(ae)
+        catch
+            return 0.
+        end
         quantile(cpu(vec(ae)), 0.95)
         # mean(abs,X - autoencode(model,X,false)) |> Flux.data |> cpu
     end
+end
+
+function reconstruction_errors(model, x::AbstractArray{<:Real}; sparsify=false)
+    CuArrays.reclaim(true)
+    X = gpu(x[:,:,:,:])
+    ae = abs.(X - autoencode(model,X,sparsify)) |> Flux.data
 end
 
 

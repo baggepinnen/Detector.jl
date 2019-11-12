@@ -1,16 +1,19 @@
-function train(model, dataset)
-    bw      = batchview(dataset)
-    pars = Flux.params(model)
+function train(model, bw; epochs=10, sparsify=false)
+    ps = Flux.params(model)
     Flux.testmode!(model)
 
-    function loss(x)
+    function loss_(x)
         X = gpu(x)
-        Z = encode(model, X, false)
+        Z = encode(model, X, sparsify)
         Xh = decode(model, Z)
-        l = sum(abs2.(Xh.-X)) * 1 // length(X)
-        for layer in model.layers
-            l += mean(abs, layer.weight)/20
+        if size(Xh,1) != size(X,1)
+            @warn "Got unequal sizes"
+            return 0
         end
+        l = sum(abs2.(Xh.-X)) * 1 // length(X)
+        # for layer in model.layers
+        #     l += mean(abs, layer.weight)/200
+        # end
         # for i = 1:size(Z,4)
         # for ch = 1:size(Z,3)
         #     lreg = sum(abs2,vec(@view(Z[:,:,ch,1])))/k
@@ -25,18 +28,17 @@ function train(model, dataset)
     end
 
 
-    n_params = sum(length, pars)
+    n_params = sum(length, ps)
     opt = gpu(ADAM(0.002))
     opt2 = gpu(ADAM(0.002))
     losses = Float32[]
 
-    ps = Flux.params(model)
-    for i = 1:10
+    Juno.@progress "Epochs" for epoch = 1:epochs
         Flux.testmode!(model, false)
-        Juno.@progress for (i, (x,_)) in enumerate(bw)
+        Juno.@progress "Epoch $(epoch)" for (i, x) in enumerate(bw)
             gs = Flux.gradient(ps) do
-                l = loss(x)
-                push!(losses, Flux.data(l))
+                l = loss_(x)
+                push!(losses, Flux.data(l)/var(x))
                 yield()
                 l
             end
@@ -50,7 +52,7 @@ function train(model, dataset)
         end
         Flux.testmode!(model, true)
 
-        if i % 1  == 0
+        if epoch % 1  == 0
             opt.eta *= 0.95
             CuArrays.reclaim(true)
             serialize("$(Dates.now())_$(length(losses)).bin", (cpu(model), opt, losses))

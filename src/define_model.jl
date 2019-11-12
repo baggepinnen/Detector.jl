@@ -4,7 +4,7 @@ const k = 5
 
 function oneactive(Z)
     Zc = cpu(Flux.data(Z))
-    a = argmax(abs.(Zc), dims=1)
+    a = argmax(abs.(Zc), dims=3)
     Zc .= 0
     Zc[a] .= 1
     Z = Flux.data(gpu(Zc)) .* Z
@@ -13,7 +13,7 @@ encode(model, X::Array, sparsify=true) = cpu(data(encode(model, gpu(X), sparsify
 encoderlength(model) = length(model) ÷ 2
 # encoderlength(model) = length(model)-2
 function encode(model, X, sparsify=true)
-    X = reshape(X, :, 1, 1, size(X,4))
+    X = reshape(X, size(X,1), 1, 1, :)
     sparsify ? oneactive(model[1:encoderlength(model)](X)) : model[1:encoderlength(model)](X)
 end
 
