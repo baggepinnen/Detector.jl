@@ -1,3 +1,12 @@
+function robust_error(X,Xh)
+        if size(Xh,1) != size(X,1)
+            @warn "Got unequal sizes"
+            m = min(size(Xh,1), size(X,1))
+            return Xh[1:m,:,:,:].-X[1:m,:,:,:]
+        end
+        Xh.-X
+end
+
 function train(model, bw; epochs=10, sparsify=false)
     ps = Flux.params(model)
     Flux.testmode!(model)
@@ -6,11 +15,7 @@ function train(model, bw; epochs=10, sparsify=false)
         X = gpu(x)
         Z = encode(model, X, sparsify)
         Xh = decode(model, Z)
-        if size(Xh,1) != size(X,1)
-            @warn "Got unequal sizes"
-            return 0
-        end
-        l = sum(abs2.(Xh.-X)) * 1 // length(X)
+        l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
         # for layer in model.layers
         #     l += mean(abs, layer.weight)/200
         # end

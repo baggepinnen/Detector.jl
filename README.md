@@ -40,11 +40,10 @@ function str_by(s)
     parse(Int, m.captures[1])*10000 + parse(Int, m.captures[2])
 end
 files = sort(savepath.*mapfiles(identity, savepath, ".bin"), by=str_by)
-labs  = fill(nothing, length(files)) # No labels for autoencoding
 
 second = 48000
-transform(x) = Flux.normalise(sqrt.(abs.(reshape(Float32.(x),:,1))).*sign.(x), dims=1) # Some transformation you may want to do on the data
-dataset = ChannelDiskDataProvider{Matrix{Float32}, Nothing}((3second,1,1), 2, 120, labels=labs, files=files, transform=transform)
+transform(x) = Flux.normalise(sqrt.(abs.(Float32.(x))).*sign.(x), dims=1) # Some transformation you may want to do on the data
+dataset = ChannelDiskDataProvider{Vector{Float32}, Nothing}((3second,), 2, 120, files=files, transform=transform)
 
 t   = start_reading(dataset) # This will start the bufering of the dataset
 istaskstarted(t) && !istaskfailed(t) && wait(dataset)
@@ -61,12 +60,21 @@ Detector.train(model, batchview(dataset), epochs=10) # Perform one epoch of trai
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```
 
+To fine tune the detector, you may run a small number of epochs on a particular dataset of interest. Just make sure you apply the same input transformation to this dataset as you did for the training dataset, example:
+```julia
+sound         = load_your_new_sound()
+newdataset    = Vector.(Iterators.partition(sound, 3second))[1:end-1] # remove the last datapoint as this is probably shorter
+model         = Detector.load_model()
+tunedataset   = dataset.transform.(newdataset)
+losses        = Detector.train(model, shuffle(tunedataset), epochs=3)
+```
+
 ## Detection using feature activations
 ```julia
 using Peaks
-model = Detector.load_model() # Load pre-trained model from disk
-errors = reconstruction_errors(model, dataset) # This will take a long time (2-5 minutes) if done on the entire dataset
-m,proms = peakprom(errors, Maxima(),100) # Find peaks in signal
+model  = Detector.load_model() # Load pre-trained model from disk
+errors = reconstruction_errors(model, dataset) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
+m,proms = peakprom(errors, Maxima(),200) # Find peaks in signal
 plot(errors);scatter!(m,errors[m], m=(:red, 3), ylabel="Errors", legend=false)
 save_interesting(dataset, m, contextwindow=1) # This will save the interesting clips to a folder on disk
 ```
