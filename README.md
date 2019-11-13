@@ -38,7 +38,7 @@ using DiskDataProviders, MLDataUtils, Flux
 
 function str_by(s)
     m = match(r"(\d+)_(\d+) secon", s)
-    parse(Int, m.captures[1])*10000 + parse(Int, m.captures[2])
+    parse(Int, m.captures[1])*1000000 + parse(Int, m.captures[2])
 end
 files = sort(savepath.*mapfiles(identity, savepath, ".bin"), by=str_by)
 
@@ -55,8 +55,9 @@ x,y = first(bw)
 ```julia
 using Flux, BSON
 model = Detector.model
-Detector.encode(model,x) # This will give you the latent channels of x
-Detector.train(model, batchview(dataset), epochs=10) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
+sparsify = true
+Detector.encode(model,x, sparsify=sparsify) # This will give you the latent channels of x
+Detector.train(model, batchview(dataset), epochs=5, sparsify=sparsify) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```
 
@@ -66,19 +67,21 @@ sound         = load_your_new_sound()
 newdataset    = Vector.(Iterators.partition(sound, 3second))[1:end-1] # remove the last datapoint as this is probably shorter
 model         = Detector.load_model()
 tunedataset   = dataset.transform.(newdataset)
-losses        = Detector.train(model, shuffle(tunedataset), epochs=3)
+losses        = Detector.train(model, shuffle(tunedataset), epochs=1)
 ```
 
 ## Detection using feature activations
 ```julia
 using Peaks
 model  = Detector.load_model() # Load pre-trained model from disk
-errors = reconstruction_errors(model, dataset) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
-m,proms = peakprom(errors, Maxima(),200) # Find peaks in signal
+errors = reconstruction_errors(model, dataset, sparsify=sparsify) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
+m,proms = peakprom(errors, Maxima(),1000) # Find peaks in signal
 plot(errors);scatter!(m,errors[m], m=(:red, 3), ylabel="Errors", legend=false)
 save_interesting(dataset, m, contextwindow=1) # This will save the interesting clips to a folder on disk
 ```
 ![window](figs/peaks.png)
+
+The call to `save_interesting` will save all interesting files to disk in wav format for you to listen to. The file paths are printed to `stdout`. A file with all the clips concatenated will also be saved. The `contextwindow` parameter determine how many clips before and after an interesting clip will be saved.
 
 ## Detection using reconstruction errors
 ```julia

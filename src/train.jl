@@ -17,28 +17,12 @@ function train(model, bw; epochs=10, sparsify=false, α=0.002)
     Flux.testmode!(model)
 
     function loss_(x)
-        X = gpu(x)
-        Z = encode(model, X, sparsify)
+        X  = gpu(x)
+        Z  = encode(model, X, sparsify)
         Xh = decode(model, Z)
-        l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
-        # for layer in model.layers
-        #     l += mean(abs, layer.weight)/200
-        # end
-        # for i = 1:size(Z,4)
-        # for ch = 1:size(Z,3)
-        #     lreg = sum(abs2,vec(@view(Z[:,:,ch,1])))/k
-        #     l += lreg/1000
-        #     if lreg > 1e-3
-        #         l += sqrt(lreg)/2000
-        #     end
-        # end
-        # end
-        # l += 10mean(abs, Z)
-        l
+        sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
     end
 
-
-    n_params = sum(length, ps)
     opt = gpu(ADAM(α))
     losses = Float32[]
 
