@@ -21,13 +21,14 @@ using Detector
 All functionality in this package operates on serialized, preprocessed data files. Serialized files are much faster to read than wav, and storing already preprocessed data cuts down on overhead. To create preprocessed files, we use any of the following
 
 ```julia
-using Detector, LazyWAVFiles, Dates
+using Detector, LazyWAVFiles
 readpath = "path/to/folder/with/wavfiles"
 savepath = "path/to/store/files"
 readpath = "/media/fredrikb/storage/crocs/20190821/"
 savepath = "/home/fredrikb/arl/crocs_processed/"
 df       = DistributedWAVFile(readpath)
-serializeall_raw(savepath, df)    # Serializes raw audio waveforms, for autoencoding
+second   = 48000
+serializeall_raw(savepath, df; segmentlength = 1second)    # Serializes raw audio waveforms, for autoencoding
 ```
 
 ## Create a dataset
@@ -41,9 +42,8 @@ function str_by(s)
 end
 files = sort(savepath.*mapfiles(identity, savepath, ".bin"), by=str_by)
 
-second = 48000
 transform(x) = Flux.normalise(sqrt.(abs.(Float32.(x))).*sign.(x), dims=1) # Some transformation you may want to do on the data
-dataset = ChannelDiskDataProvider{Vector{Float32}, Nothing}((3second,), 2, 120, files=files, transform=transform)
+dataset = ChannelDiskDataProvider{Vector{Float32}, Nothing}((1second,), 12, 120, files=files, transform=transform)
 
 t   = start_reading(dataset) # This will start the bufering of the dataset
 istaskstarted(t) && !istaskfailed(t) && wait(dataset)

@@ -1,13 +1,29 @@
 
 using Flux: data
-const k = 5
+const k = 10
+
+function sparsify_channels!(Zc)
+    @inbounds for bi in 1:size(Zc,4)
+        i = 0
+        am = 0.
+        for ci in 1:size(Zc,3)
+            a = sum(abs, @view(Zc[:,:,ci,bi]))
+            if a > am
+                am = a
+                i = ci
+            end
+        end
+        # acts = vec(sum(abs, @view(Zc[:,:,:,bi]), dims=1))
+        # i = argmax(acts)
+        Zc[:,:,:,bi] .= 0
+        Zc[:,:,i,bi] .= 1
+    end
+end
 
 function oneactive(Z)
     Zc = cpu(Flux.data(Z))
-    a = argmax(abs.(Zc), dims=3)
-    Zc .= 0
-    Zc[a] .= 1
-    Z = Flux.data(gpu(Zc)) .* Z
+    sparsify_channels!(Zc)
+    Z = gpu(Zc) .* Z
 end
 encode(model, X::Array, sparsify=true) = cpu(data(encode(model, gpu(X), sparsify)))
 encoderlength(model) = length(model) ÷ 2

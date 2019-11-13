@@ -7,7 +7,12 @@ function robust_error(X,Xh)
         Xh.-X
 end
 
-function train(model, bw; epochs=10, sparsify=false)
+"""
+    train(model, batchview; epochs=10, sparsify=false, α=0.002)
+
+`α` is the stepsize.
+"""
+function train(model, bw; epochs=10, sparsify=false, α=0.002)
     ps = Flux.params(model)
     Flux.testmode!(model)
 
@@ -34,8 +39,7 @@ function train(model, bw; epochs=10, sparsify=false)
 
 
     n_params = sum(length, ps)
-    opt = gpu(ADAM(0.002))
-    opt2 = gpu(ADAM(0.002))
+    opt = gpu(ADAM(α))
     losses = Float32[]
 
     Juno.@progress "Epochs" for epoch = 1:epochs
@@ -52,7 +56,8 @@ function train(model, bw; epochs=10, sparsify=false)
                 CuArrays.reclaim(true)
                 supergc()
                 CuArrays.reclaim(true)
-                plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss") |> display
+                @async plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss") |> display
+                yield()
             end
         end
         Flux.testmode!(model, true)

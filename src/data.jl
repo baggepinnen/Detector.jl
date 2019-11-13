@@ -81,7 +81,8 @@ end
 
 
 
-function serializeall_raw(savepath::AbstractString, df::DistributedWAVFile; segmentlength = 3second)
+function serializeall_raw(savepath::AbstractString, df::DistributedWAVFile; segmentlength = 1second)
+    @assert segmentlength%second == 0 "No support for segment lengths of fractions of seconds"
     for file in df.files
         filename = file.path |> splitpath |> last |> splitext |> first
         nfullsegments = length(file) ÷ segmentlength
@@ -89,7 +90,7 @@ function serializeall_raw(savepath::AbstractString, df::DistributedWAVFile; segm
         sound = Float16.(file[:])
         supergc()
         for (i,inds) in enumerate(Iterators.partition(1:length(sound), segmentlength))
-            starttime = (i-1)Second(3)
+            starttime = (i-1)Second(segmentlength÷second)
             serialize(joinpath(savepath, string(filename,"_", starttime, ".bin")),  sound[inds])
         end
 
