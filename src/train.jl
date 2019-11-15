@@ -36,7 +36,7 @@ function train(model, bw; epochs=10, sparsify=false, α=0.002)
                 l
             end
             Flux.Optimise.update!(opt, ps, gs)
-            if i % 500 == 0
+            if i % 1000 == 0
                 CuArrays.reclaim(true)
                 supergc()
                 CuArrays.reclaim(true)

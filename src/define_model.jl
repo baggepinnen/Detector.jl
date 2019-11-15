@@ -1,6 +1,17 @@
 
 using Flux: data
-const k = 10
+const k = 20
+
+function sparsify_wta!(Zc)
+    @inbounds for bi in 1:size(Zc,4)
+        for ci in 1:size(Zc,3)
+            a = argmax(abs.(@view(Zc[:,:,ci,bi]))[:])
+            Zc[:,:,ci,bi] .= 0.01 .* randn.()
+            Zc[a,:,ci,bi] .= 1
+        end
+    end
+    # sum(Zc, dims=1:3)
+end
 
 function sparsify_channels!(Zc)
     @inbounds for bi in 1:size(Zc,4)
@@ -13,16 +24,17 @@ function sparsify_channels!(Zc)
                 i = ci
             end
         end
+        rand() < 0.01 && @show i
         # acts = vec(sum(abs, @view(Zc[:,:,:,bi]), dims=1))
         # i = argmax(acts)
-        Zc[:,:,:,bi] .= 0
+        Zc[:,:,:,bi] .= 0.1randn(size(Zc)[1:3]...)
         Zc[:,:,i,bi] .= 1
     end
 end
 
 function oneactive(Z)
     Zc = cpu(Flux.data(Z))
-    sparsify_channels!(Zc)
+    sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end
 encode(model, X::Array, sparsify=true) = cpu(data(encode(model, gpu(X), sparsify)))

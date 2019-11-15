@@ -60,7 +60,7 @@ function save_interesting_concat(dataset, inds::Vector{Int}, tempdir=mktempdir()
 end
 
 
-function feature_activations(model, dataset; sparsify=false)
+function feature_activations(model, dataset; sparsify=true)
     F = map(dataset) do x
         Z = encode(model, x[:,:,:,:], sparsify)
         feature_activations = mapslices(norm, Z, dims=(1,2)) |> vec
@@ -71,7 +71,7 @@ end
 
 nf = second÷5
 const errorf = gpu(MeanPool((nf,1)))
-function reconstruction_errors(model, dataset; sparsify=false)
+function reconstruction_errors(model, dataset; sparsify=true)
     map(dataset) do x
         CuArrays.reclaim(true)
         X = gpu(x[:,:,:,:])
@@ -87,7 +87,7 @@ function reconstruction_errors(model, dataset; sparsify=false)
     end
 end
 
-function reconstruction_errors(model, x::AbstractArray{<:Real}; sparsify=false)
+function reconstruction_errors(model, x::AbstractArray{<:Real}; sparsify=true)
     CuArrays.reclaim(true)
     X = gpu(x[:,:,:,:])
     ae = abs.(X - autoencode(model,X,sparsify)) |> Flux.data |> cpu

@@ -70,7 +70,7 @@ tunedataset   = dataset.transform.(newdataset)
 losses        = Detector.train(model, shuffle(tunedataset), epochs=1)
 ```
 
-## Detection using feature activations
+## Detection using reconstruction errors
 ```julia
 using Peaks
 model  = Detector.load_model() # Load pre-trained model from disk
@@ -83,15 +83,18 @@ save_interesting(dataset, m, contextwindow=1) # This will save the interesting c
 
 The call to `save_interesting` will save all interesting files to disk in wav format for you to listen to. The file paths are printed to `stdout`. A file with all the clips concatenated will also be saved. The `contextwindow` parameter determine how many clips before and after an interesting clip will be saved.
 
-## Detection using reconstruction errors
+## Detection using feature activations
+The idea here is to look at the features that ar least activated. When thos features are activated, it means there is something rare in the signal. I did not get great results with this method, it tended to only pick events of one particular type, in my case, a snapping insect.
 ```julia
-F = feature_activations(model, dataset)
-plot(q->quantile(F[:], q), 0, 1)
-Fth = F .> quantile(F[:], 0.01)
-activation_percentage = mean(Fth,dims=2)[:]
-least_activated_featureinds = sortperm(activation_percentage)[:]
-least_activated_features = F[least_activated_featureinds, :]
-least_activated_features_th = Fth[least_activated_featureinds, :]
-plot(least_activated_features_th')
-save_interesting(dataset, least_activated_features_th[2,1:10])
+using Peaks
+F = feature_activations(model, dataset, sparsify=sparsify)
+acts = mean(abs, F, dims=2)[:]
+least_activated_featureinds = sortperm(acts)
+least_activated_features = F[least_activated_featureinds[1:8], :]
+interesting = map(eachrow(least_activated_features)) do feature
+    m,proms = peakprom(feature, Maxima(),1000) # Find peaks in signal
+    m[sortperm(proms, rev=true)[1:20]]
+end
+interesting = unique(reduce(vcat, interesting))
+save_interesting(dataset, interesting)
 ```
