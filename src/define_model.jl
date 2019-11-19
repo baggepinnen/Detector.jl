@@ -1,6 +1,8 @@
 
-using Flux: data
-const k = 20
+# using Flux: data
+using Zygote
+# data(x) = x
+const k = 15
 
 function sparsify_wta!(Zc)
     @inbounds for bi in 1:size(Zc,4)
@@ -32,8 +34,10 @@ function sparsify_channels!(Zc)
     end
 end
 
+Zygote.@nograd sparsify_wta!
+
 function oneactive(Z)
-    Zc = cpu(Flux.data(Z))
+    Zc = cpu(Zygote.dropgrad(Z))
     sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end

@@ -5,7 +5,7 @@ using Base.Iterators
 using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno, NNlib
 using ImageFiltering # Used in utils
 
-export save_interesting, save_interesting_concat, feature_activations, reconstruction_errors
+export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error
 
 
 include("mel.jl")
@@ -60,7 +60,7 @@ function save_interesting_concat(dataset, inds::Vector{Int}, tempdir=mktempdir()
 end
 
 
-function feature_activations(model, dataset; sparsify=true)
+function feature_activations(model, dataset; sparsify)
     F = map(dataset) do x
         Z = encode(model, x[:,:,:,:], sparsify)
         feature_activations = mapslices(norm, Z, dims=(1,2)) |> vec
@@ -71,26 +71,30 @@ end
 
 nf = second÷5
 const errorf = gpu(MeanPool((nf,1)))
-function reconstruction_errors(model, dataset; sparsify=true)
-    map(dataset) do x
-        CuArrays.reclaim(true)
-        X = gpu(x[:,:,:,:])
-        Xh = autoencode(model,X,sparsify)
-        ae = abs.(robust_error(X,Xh)) |> Flux.data
-        try
-            ae = errorf(ae)
-        catch
-            return 0.
+function abs_reconstruction_errors(model, dataset; sparsify)
+    Juno.progress() do id
+        map(enumerate(dataset)) do (i,x)
+            # CuArrays.reclaim(true)
+            X = gpu(x[:,:,:,:])
+            Xh = autoencode(model,X,sparsify)
+            ae = abs.(robust_error(X,Xh)) |> Flux.data
+            try
+                ae = errorf(ae)
+            catch
+                return 0.
+            end
+            @info "Reconstruction errors" progress=i/length(dataset) _id=id
+            quantile(cpu(vec(ae)), 0.90)
+            # mean(abs,X - autoencode(model,X,false)) |> Flux.data |> cpu
         end
-        quantile(cpu(vec(ae)), 0.90)
-        # mean(abs,X - autoencode(model,X,false)) |> Flux.data |> cpu
     end
 end
 
-function reconstruction_errors(model, x::AbstractArray{<:Real}; sparsify=true)
-    CuArrays.reclaim(true)
+function reconstruction_error(model, x::AbstractArray{<:Real}; sparsify)
+    # CuArrays.reclaim(true)
     X = gpu(x[:,:,:,:])
-    ae = abs.(X - autoencode(model,X,sparsify)) |> Flux.data |> cpu
+    Xh = autoencode(model,X,sparsify)
+    ae = robust_error(X,Xh) |> Flux.data |> cpu |> vec
 end
 
 
