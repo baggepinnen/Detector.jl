@@ -1,6 +1,7 @@
 
 using Flux: data
 const k = 20
+const k2 = 3
 
 function sparsify_wta!(Zc)
     @inbounds for bi in 1:size(Zc,4)
@@ -37,17 +38,19 @@ function oneactive(Z)
     sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end
-encode(model, X::Array, sparsify=true) = cpu(data(encode(model, gpu(X), sparsify)))
-encoderlength(model) = length(model) ÷ 2
-# encoderlength(model) = length(model)-2
-function encode(model, X, sparsify=true)
+encode(model, X::Array, sparsify) = cpu(data(encode(model, gpu(X), sparsify)))
+# encoderlength(model) = length(model) ÷ 2
+encoderlength(model) = length(model)-1
+function encode(model, X::CuArray, sparsify)
     X = reshape(X, size(X,1), 1, 1, :)
-    sparsify ? oneactive(model[1:encoderlength(model)](X)) : model[1:encoderlength(model)](X)
+    Z = model[1:encoderlength(model)](X)
+    # sparsify ? oneactive(Z) : Z
+    Z
 end
 
 decode(model, Z) = model[encoderlength(model)+1:end](Z)
-autoencode(mode,x, sparsify=true) = decode(model,encode(model, x, sparsify))
-autoencode(mode,x::Array, sparsify=true) = decode(model,encode(model, gpu(x), sparsify)) |> data |> cpu
+autoencode(model,x::CuArray, sparsify) = decode(model,encode(model, x, sparsify))
+autoencode(model,x::Array, sparsify) = decode(model,encode(model, gpu(x), sparsify)) |> data |> cpu
 # model = Chain(
 #                 Conv((7,1), 1 =>1k, relu, pad=(3,0)),
 #                 Conv((7,1), 1k=>1k, relu, pad=(3,0)),
@@ -60,16 +63,25 @@ autoencode(mode,x::Array, sparsify=true) = decode(model,encode(model, gpu(x), sp
 #                 )
 function __init__()
     # The model definition must be done at init time since it contains pointers to CuArrays on the GPU, ref https://github.com/JuliaPy/PyCall.jl#using-pycall-from-julia-modules
+    # global model = Chain(
+    #                 Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
+    #                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
+    #                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+    #                 Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+    #                 Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
+    #                 ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
+    #                 ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=2),
+    #                 ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+    #                 ConvTranspose((11,1),  1k=>1k, leakyrelu, pad=(0,0)),
+    #                 ConvTranspose((24,1),  1k=>1,            pad=(0,0)),
+    #                 )
+
+
     global model = Chain(
-                    Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
-                    Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
-                    Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
-                    Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
-                    Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
-                    ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
-                    ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=2),
-                    ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
-                    ConvTranspose((11,1),  1k=>1k, leakyrelu, pad=(0,0)),
-                    ConvTranspose((24,1),  1k=>1,            pad=(0,0)),
-                    ) |> gpu
+                    Conv((11,1), 1 =>1k2,  leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k2=>5k2,            pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 5k2=>1,      pad=(15,0), dilation=(3,1)),
+                    )
 end

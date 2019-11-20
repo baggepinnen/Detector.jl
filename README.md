@@ -74,7 +74,7 @@ losses        = Detector.train(model, shuffle(tunedataset), epochs=1)
 ```julia
 using Peaks
 model  = Detector.load_model() # Load pre-trained model from disk
-errors = reconstruction_errors(model, dataset, sparsify=sparsify) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
+errors = abs_reconstruction_errors(model, dataset, sparsify=sparsify) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
 m,proms = peakprom(errors, Maxima(),1000) # Find peaks in signal
 plot(errors);scatter!(m,errors[m], m=(:red, 3), ylabel="Errors", legend=false)
 save_interesting(dataset, m, contextwindow=1) # This will save the interesting clips to a folder on disk

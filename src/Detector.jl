@@ -2,10 +2,10 @@ module Detector
 using Statistics, LinearAlgebra, Serialization
 using Base.Threads: @threads, nthreads, threadid, @spawn
 using Base.Iterators
-using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno, NNlib
+using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno, NNlib, SliceMap
 using ImageFiltering # Used in utils
 
-export save_interesting, save_interesting_concat, feature_activations, reconstruction_errors
+export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error
 
 
 include("mel.jl")
@@ -60,7 +60,7 @@ function save_interesting_concat(dataset, inds::Vector{Int}, tempdir=mktempdir()
 end
 
 
-function feature_activations(model, dataset; sparsify=true)
+function feature_activations(model, dataset; sparsify)
     F = map(dataset) do x
         Z = encode(model, x[:,:,:,:], sparsify)
         feature_activations = mapslices(norm, Z, dims=(1,2)) |> vec
@@ -71,7 +71,7 @@ end
 
 nf = second÷5
 const errorf = gpu(MeanPool((nf,1)))
-function reconstruction_errors(model, dataset; sparsify=true)
+function abs_reconstruction_errors(model, dataset; sparsify)
     map(dataset) do x
         CuArrays.reclaim(true)
         X = gpu(x[:,:,:,:])
@@ -87,10 +87,11 @@ function reconstruction_errors(model, dataset; sparsify=true)
     end
 end
 
-function reconstruction_errors(model, x::AbstractArray{<:Real}; sparsify=true)
-    CuArrays.reclaim(true)
+function reconstruction_error(model, x::AbstractArray{<:Real}; sparsify)
+    # CuArrays.reclaim(true)
     X = gpu(x[:,:,:,:])
-    ae = abs.(X - autoencode(model,X,sparsify)) |> Flux.data |> cpu
+    Xh = autoencode(model,X,sparsify)
+    robust_error(X,Xh) |> Flux.data |> cpu |> vec
 end
 
 
