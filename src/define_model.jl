@@ -3,6 +3,61 @@ using Flux: data
 const k = 20
 const k2 = 3
 
+struct MixtureAutoencoder{TE,TD,TM,TS}
+    e::TE
+    d::TD
+    m::TM
+    state::TS
+end
+Flux.@treelike MixtureAutoencoder
+(m::MixtureAutoencoder)(x) = autoencode(m,x,true)
+
+function MixtureAutoencoder(k)
+
+    e = Chain(      Conv((11,1), 1 =>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k=>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k=>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
+                    Conv((11,1), 1k=>5k,            pad=(15,0), dilation=(3,1)),
+                    )
+    d = Conv((11,1), 5k=>5k,             pad=(15,0), dilation=(3,1))
+    m = Chain(Z->reshape(Z,:,size(Z,3)), Z->mapcols(norm, Z), x->x[:], gpu, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
+    MixtureAutoencoder(e,d,m,fill(Float32(1/5k), 5k))
+end
+
+
+encoderlength(model::MixtureAutoencoder) = length(model.ae) - 1
+function encode(model::MixtureAutoencoder, X::CuArray, _=true)
+    X = reshape(X, size(X,1), 1, 1, :)
+    Z = model.e(X)
+    M = model.m(Z)
+    (Z, M)
+end
+decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), size(Z,1), :) .* M'
+
+scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
+CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
+vectorent(x::AbstractArray) = sum(scalarent, x)
+
+function loss(model::MixtureAutoencoder, x)
+    X   = gpu(x)
+    Z,M = encode(model, X)
+    Xh  = decode(model, (Z,M))
+    l   = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
+    le, state = longterm_entropy(M, model.state)
+    model.state .= state
+    ie = vectorent(M)
+    # @show M
+    # @show ((l, ie, le))
+    l + ie #- le
+end
+
+function longterm_entropy(Zn, state, λ=0.999f0)
+    state = max.(Zn, λ*state) |> x-> x./sum(x)
+    # ent   = sum(state .* log.(state))
+    ent   = vectorent(state)
+    ent, Flux.data(state)
+end
+
 function sparsify_wta!(Zc)
     @inbounds for bi in 1:size(Zc,4)
         for ci in 1:size(Zc,3)
@@ -13,6 +68,7 @@ function sparsify_wta!(Zc)
     end
     # sum(Zc, dims=1:3)
 end
+encoderlength(model::MixtureAutoencoder) = length(model)-1
 
 function sparsify_channels!(Zc)
     @inbounds for bi in 1:size(Zc,4)
@@ -38,9 +94,39 @@ function oneactive(Z)
     sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end
+
+# generic ======================================================================
 encode(model, X::Array, sparsify) = cpu(data(encode(model, gpu(X), sparsify)))
-# encoderlength(model) = length(model) ÷ 2
-encoderlength(model) = length(model)-1
+autoencode(model,x::Array, sparsify) = decode(model,encode(model, gpu(x), sparsify)) |> data |> cpu
+autoencode(model,x::CuArray, sparsify) = decode(model,encode(model, x, sparsify))
+# ==============================================================================
+# Standard model
+
+
+function loss(model, x)
+    X  = gpu(x)
+    Z  = encode(model, X, sparsify)
+    Zn = slicemap(norm, Z, dims=(1,2)) |> softmax
+    Z = Z .* Zn
+    Xh = decode(model, Z)
+    l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
+    if sparsify && rand() < 0.5
+        # l2 = zero(l)
+        # for b in 1:size(Z,4), c in 1:size(Z,3)
+        #     l2 += sum(gpu([λi]).*norm(@view(Z[:,:,c,b])))
+        # end
+        return l - entropy(Zn) - longterm_entropy(Zn)
+
+        # l += sum(gpu([λi]).*sum(abs,Z)/ size(Z,3))
+        # l2 = sum(norm(@view(Z[:,:,c])) c in 1:size(Z,3)*size(Z,4))
+        # l += l2 * (1 // size(Z,3))
+    end
+    l
+end
+
+
+
+encoderlength(model) = length(model) ÷ 2
 function encode(model, X::CuArray, sparsify)
     X = reshape(X, size(X,1), 1, 1, :)
     Z = model[1:encoderlength(model)](X)
@@ -49,8 +135,6 @@ function encode(model, X::CuArray, sparsify)
 end
 
 decode(model, Z) = model[encoderlength(model)+1:end](Z)
-autoencode(model,x::CuArray, sparsify) = decode(model,encode(model, x, sparsify))
-autoencode(model,x::Array, sparsify) = decode(model,encode(model, gpu(x), sparsify)) |> data |> cpu
 # model = Chain(
 #                 Conv((7,1), 1 =>1k, relu, pad=(3,0)),
 #                 Conv((7,1), 1k=>1k, relu, pad=(3,0)),
