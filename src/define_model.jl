@@ -3,6 +3,8 @@ using Flux: data
 const k = 20
 const k2 = 3
 
+@inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
+
 struct MixtureAutoencoder{TE,TD,TM,TS}
     e::TE
     d::TD
@@ -12,6 +14,9 @@ end
 Flux.@treelike MixtureAutoencoder
 (m::MixtureAutoencoder)(x) = autoencode(m,x,true)
 
+preM(Z) = vec(mapcols(norm,reshape(Z,:,size(Z,3))))
+preM(Z::CuArray) = gpu(vec(mapcols(norm,reshape(Z,:,size(Z,3)))))
+
 function MixtureAutoencoder(k)
 
     e = Chain(      Conv((11,1), 1 =>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
@@ -20,13 +25,14 @@ function MixtureAutoencoder(k)
                     Conv((11,1), 1k=>5k,            pad=(15,0), dilation=(3,1)),
                     )
     d = Conv((11,1), 5k=>5k,             pad=(15,0), dilation=(3,1))
-    m = Chain(Z->reshape(Z,:,size(Z,3)), Z->mapcols(norm, Z), x->x[:], gpu, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
+    m = Chain(preM, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
     MixtureAutoencoder(e,d,m,fill(Float32(1/5k), 5k))
 end
 
+@inline ongpu(m::MixtureAutoencoder) = m.e[1].bias isa CuArray
 
 encoderlength(model::MixtureAutoencoder) = length(model.ae) - 1
-function encode(model::MixtureAutoencoder, X::CuArray, _=true)
+function encode(model::MixtureAutoencoder, X, _=true)
     X = reshape(X, size(X,1), 1, 1, :)
     Z = model.e(X)
     M = model.m(Z)
@@ -39,7 +45,7 @@ CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
 vectorent(x::AbstractArray) = sum(scalarent, x)
 
 function loss(model::MixtureAutoencoder, x)
-    X   = gpu(x)
+    X = maybegpu(model, x)
     Z,M = encode(model, X)
     Xh  = decode(model, (Z,M))
     l   = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
@@ -96,12 +102,17 @@ function oneactive(Z)
 end
 
 # generic ======================================================================
-encode(model, X::Array, sparsify) = cpu(data(encode(model, gpu(X), sparsify)))
-autoencode(model,x::Array, sparsify) = decode(model,encode(model, gpu(x), sparsify)) |> data |> cpu
-autoencode(model,x::CuArray, sparsify) = decode(model,encode(model, x, sparsify))
+# function encode(model, X, sparsify)
+#     cpu(data(encode(model, maybegpu(model,X), sparsify)))
+# end
+# function autoencode(model,x, sparsify)
+#     decode(model,encode(model, maybegpu(model,x), sparsify)) |> data |> cpu
+# end
+
+autoencode(model,x, sparsify) = decode(model,encode(model, x, sparsify))
 # ==============================================================================
 # Standard model
-
+ongpu(m) = m[1].bias isa CuArray
 
 function loss(model, x)
     X  = gpu(x)
@@ -146,6 +157,9 @@ decode(model, Z) = model[encoderlength(model)+1:end](Z)
 #                 Conv((7,1), 1k=>1,        pad=(3,0))
 #                 )
 function __init__()
+
+     # @require CuArrays="3a865a2d-5b23-5a0f-bc46-62713ec82fae"
+
     # The model definition must be done at init time since it contains pointers to CuArrays on the GPU, ref https://github.com/JuliaPy/PyCall.jl#using-pycall-from-julia-modules
     # global model = Chain(
     #                 Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),

@@ -18,7 +18,7 @@ include("data.jl")
 export second, mapfiles, serializeall_raw, getexamplewhere, confusing_parts, seconds2hms
 
 include("define_model.jl")
-export encode, decode, autoencode
+export encode, decode, autoencode, ongpu, maybegpu
 
 include("train.jl")
 

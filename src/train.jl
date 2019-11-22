@@ -28,13 +28,13 @@ function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses 
                 yield()
                 l
             end
-            i % 3 == 0 && error()
+            # i % 3 == 0 && error()
             i % 50 == 0 && GC.gc(); sleep(0.1)
             Flux.Optimise.update!(opt, ps, gs)
             if i % 250 == 0
                 # CuArrays.reclaim(true)
                 supergc()
-                CuArrays.BinnedPool.reclaim(true)
+                ongpu(model) && CuArrays.BinnedPool.reclaim(true)
                 # CuArrays.reclaim(true)
                 @async plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss") |> display
                 GC.gc()
