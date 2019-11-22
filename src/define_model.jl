@@ -15,7 +15,7 @@ Flux.@treelike MixtureAutoencoder
 (m::MixtureAutoencoder)(x) = autoencode(m,x,true)
 
 preM(Z) = vec(mapcols(norm,reshape(Z,:,size(Z,3))))
-preM(Z::CuArray) = gpu(vec(mapcols(norm,reshape(Z,:,size(Z,3)))))
+preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(vec(mapcols(norm,reshape(Z,:,size(Z,3)))))
 
 function MixtureAutoencoder(k)
 
@@ -29,16 +29,16 @@ function MixtureAutoencoder(k)
     MixtureAutoencoder(e,d,m,fill(Float32(1/5k), 5k))
 end
 
-@inline ongpu(m::MixtureAutoencoder) = m.e[1].bias isa CuArray
+@inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
 
 encoderlength(model::MixtureAutoencoder) = length(model.ae) - 1
 function encode(model::MixtureAutoencoder, X, _=true)
-    X = reshape(X, size(X,1), 1, 1, :)
+    X = reshape(maybegpu(model,X), size(X,1), 1, 1, :)
     Z = model.e(X)
     M = model.m(Z)
     (Z, M)
 end
-decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), size(Z,1), :) .* M'
+decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), size(Z,1), :) * M
 
 scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
 CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
@@ -112,7 +112,7 @@ end
 autoencode(model,x, sparsify) = decode(model,encode(model, x, sparsify))
 # ==============================================================================
 # Standard model
-ongpu(m) = m[1].bias isa CuArray
+ongpu(m) = m[1].bias.data isa CuArray
 
 function loss(model, x)
     X  = gpu(x)
@@ -136,9 +136,8 @@ function loss(model, x)
 end
 
 
-
 encoderlength(model) = length(model) ÷ 2
-function encode(model, X::CuArray, sparsify)
+function encode(model, X, sparsify)
     X = reshape(X, size(X,1), 1, 1, :)
     Z = model[1:encoderlength(model)](X)
     # sparsify ? oneactive(Z) : Z

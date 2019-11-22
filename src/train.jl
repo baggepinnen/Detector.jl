@@ -12,7 +12,7 @@ end
 
 `α` is the stepsize.
 """
-function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses = Float32[], λ=1)
+function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses = Float32[], λ=1, kwargs...)
     ps = Flux.params(model)
     Flux.testmode!(model)
 
@@ -36,7 +36,7 @@ function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses 
                 supergc()
                 ongpu(model) && CuArrays.BinnedPool.reclaim(true)
                 # CuArrays.reclaim(true)
-                @async plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss") |> display
+                @async plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss", kwargs...) |> display
                 GC.gc()
                 yield()
                 sleep(0.1)
