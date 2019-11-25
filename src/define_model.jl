@@ -5,7 +5,7 @@ const k2 = 3
 
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 
-struct MixtureAutoencoder{TE,TD,TM,TS}
+mutable struct MixtureAutoencoder{TE,TD,TM,TS}
     e::TE
     d::TD
     m::TM
@@ -19,14 +19,19 @@ preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(vec(mapcols(norm,re
 
 function MixtureAutoencoder(k)
 
-    e = Chain(      Conv((11,1), 1 =>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k=>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k=>1k, leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k=>5k,            pad=(15,0), dilation=(3,1)),
+    e = Chain(  Conv((7,1), 1 =>1k, leakyrelu, pad=(0,0)),
+                Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
+                Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+                Conv((11,1), 1k=>1k, leakyrelu, dilation=4, pad=(0,0), stride=2),
+                Conv((11,1), 1k=>5k,            pad=(0,0), stride=2),
                     )
-    d = Conv((11,1), 5k=>5k,             pad=(15,0), dilation=(3,1))
+    d = Chain(ConvTranspose((11,1), 5k=>5k, leakyrelu, stride=2),
+                    ConvTranspose((13,1), 5k=>5k, leakyrelu, dilation=3, stride=2),
+                    ConvTranspose((13,1), 5k=>5k, leakyrelu, stride=2),
+                    ConvTranspose((13,1),  5k=>5k, leakyrelu),
+                    ConvTranspose((16,1),  5k=>5k))
     m = Chain(preM, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
-    MixtureAutoencoder(e,d,m,fill(Float32(1/5k), 5k))
+    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)))
 end
 
 @inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
@@ -38,7 +43,7 @@ function encode(model::MixtureAutoencoder, X, _=true)
     M = model.m(Z)
     (Z, M)
 end
-decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), size(Z,1), :) * M
+decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), :, size(Z,3)) * M
 
 scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
 CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
@@ -50,18 +55,25 @@ function loss(model::MixtureAutoencoder, x)
     Xh  = decode(model, (Z,M))
     l   = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
     le, state = longterm_entropy(M, model.state)
-    model.state .= state
+    model.state = state
     ie = vectorent(M)
     # @show M
     # @show ((l, ie, le))
-    l + ie #- le
+    l, ie, -4le
 end
 
-function longterm_entropy(Zn, state, λ=0.999f0)
-    state = max.(Zn, λ*state) |> x-> x./sum(x)
-    # ent   = sum(state .* log.(state))
+counter = 0
+function longterm_entropy(Zn, state, λ=0.95f0)
+    global counter += 1
+    state = (1-λ)*Zn + λ*state |> x-> x./sum(x)
     ent   = vectorent(state)
-    ent, Flux.data(state)
+    # state.tracker.f = Tracker.Call(nothing, ())
+    if counter == 25
+        state = Flux.param(state.data)
+        counter = 0
+    end
+    # ent   = sum(state .* log.(state))
+    ent, state
 end
 
 function sparsify_wta!(Zc)
@@ -163,7 +175,7 @@ function __init__()
     # global model = Chain(
     #                 Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
     #                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
-    #                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+    #                 Conv((11,1), 1k=>1k, leakyrelu, stride=2),
     #                 Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
     #                 Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
     #                 ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),

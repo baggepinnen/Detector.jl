@@ -7,6 +7,8 @@ function robust_error(X,Xh)
     Xh.-X
 end
 
+Base.Matrix(x::Vector{<:Tuple}) = reduce(hcat, getindex.(x,i) for i in eachindex(x[1]))
+
 """
     train(model, batchview; epochs=10, sparsify=false, α=0.002)
 
@@ -21,25 +23,22 @@ function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses 
     Juno.@progress "Epochs" for epoch = 1:epochs
         Flux.testmode!(model, false)
         Juno.@progress "Epoch $(epoch)" for (i, x) in enumerate(bw)
-            λi = min(λi + λ/2000,λ)
+            λi = Float32(min(λi + λ/2000,λ))
             gs = Flux.gradient(ps) do
-                l = loss(model, x)
-                push!(losses, Flux.data(l)/var(x))
+                l1,l2,l3 = loss(model, x)
+                push!(losses, Flux.data.((l1/var(x),l2,l3)))
                 yield()
-                l
+                λi*l1+l2+l3
             end
             # i % 3 == 0 && error()
-            i % 50 == 0 && GC.gc(); sleep(0.1)
+            # i % 100 == 0 && GC.gc();
             Flux.Optimise.update!(opt, ps, gs)
-            if i % 250 == 0
+            if i % 500 == 0
                 # CuArrays.reclaim(true)
                 supergc()
                 ongpu(model) && CuArrays.BinnedPool.reclaim(true)
                 # CuArrays.reclaim(true)
-                @async plot(losses, yscale=:log10, legend=false, xlabel="Number of batches", ylabel="Loss", kwargs...) |> display
-                GC.gc()
-                yield()
-                sleep(0.1)
+                plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...) |> display
             end
         end
         Flux.testmode!(model, true)
@@ -48,7 +47,7 @@ function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses 
             opt.eta *= 0.95
             # CuArrays.reclaim(true)
             serialize("$(Dates.now())_$(length(losses)).bin", (cpu(model), opt, losses))
-            any(isfinite, losses) && plot(losses, yscale=:log10, legend=false) |> display
+            plot(Matrix(losses), legend=false) |> display
             sleep(0.1)
         end
     end
