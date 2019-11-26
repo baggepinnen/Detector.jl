@@ -5,11 +5,12 @@ const k2 = 3
 
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 
-mutable struct MixtureAutoencoder{TE,TD,TM,TS}
+Base.@kwdef mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
     e::TE
     d::TD
     m::TM
     state::TS
+    weights::TW = (10.0f0,10.0f0)
 end
 Flux.@treelike MixtureAutoencoder
 (m::MixtureAutoencoder)(x) = autoencode(m,x,true)
@@ -31,7 +32,7 @@ function MixtureAutoencoder(k)
                     ConvTranspose((13,1),  5k=>5k, leakyrelu),
                     ConvTranspose((16,1),  5k=>5k))
     m = Chain(preM, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
-    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)))
+    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (10.0f0,10.0f0))
 end
 
 @inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
@@ -50,17 +51,22 @@ CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
 vectorent(x::AbstractArray) = sum(scalarent, x)
 
 function loss(model::MixtureAutoencoder, x)
-    X = maybegpu(model, x)
-    Z,M = encode(model, X)
-    Xh  = decode(model, (Z,M))
-    l   = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
-    le, state = longterm_entropy(M, model.state)
+    X           = maybegpu(model, x)
+    Z,M         = encode(model, X)
+    Xh          = decode(model, (Z,M))
+    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
+    le, state   = longterm_entropy(M, model.state)
     model.state = state
     ie = vectorent(M)
-    # @show M
-    # @show ((l, ie, le))
-    l, ie, -4le
+    λi,λl = model.weights
+    λi += Flux.data(0.0001f0*(ie-l))
+    λl += Flux.data(0.0001f0*(le-l))
+    model.weights = (λi,λl)
+    l, λi*ie, -λl*le
+    # l, ie, -le
 end
+
+
 
 counter = 0
 function longterm_entropy(Zn, state, λ=0.95f0)
@@ -128,28 +134,16 @@ ongpu(m) = m[1].bias.data isa CuArray
 
 function loss(model, x)
     X  = gpu(x)
-    Z  = encode(model, X, sparsify)
-    Zn = slicemap(norm, Z, dims=(1,2)) |> softmax
-    Z = Z .* Zn
+    Z  = encode(model, X, true)
     Xh = decode(model, Z)
     l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
-    if sparsify && rand() < 0.5
-        # l2 = zero(l)
-        # for b in 1:size(Z,4), c in 1:size(Z,3)
-        #     l2 += sum(gpu([λi]).*norm(@view(Z[:,:,c,b])))
-        # end
-        return l - entropy(Zn) - longterm_entropy(Zn)
-
-        # l += sum(gpu([λi]).*sum(abs,Z)/ size(Z,3))
-        # l2 = sum(norm(@view(Z[:,:,c])) c in 1:size(Z,3)*size(Z,4))
-        # l += l2 * (1 // size(Z,3))
-    end
     l
 end
 
 
 encoderlength(model) = length(model) ÷ 2
 function encode(model, X, sparsify)
+    X = maybegpu(model,X)
     X = reshape(X, size(X,1), 1, 1, :)
     Z = model[1:encoderlength(model)](X)
     # sparsify ? oneactive(Z) : Z

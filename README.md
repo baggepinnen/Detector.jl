@@ -56,7 +56,7 @@ x,y = first(bw)
 using Flux, BSON
 model = Detector.model
 sparsify = true
-Detector.encode(model,x, sparsify=sparsify) # This will give you the latent channels of x
+Detector.encode(model,x, sparsify) # This will give you the latent channels of x
 Detector.train(model, batchview(dataset), epochs=5, sparsify=sparsify) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```

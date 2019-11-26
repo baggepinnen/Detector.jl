@@ -8,6 +8,7 @@ function robust_error(X,Xh)
 end
 
 Base.Matrix(x::Vector{<:Tuple}) = reduce(hcat, getindex.(x,i) for i in eachindex(x[1]))
+Base.Matrix(x::Vector) = x[:,:]
 
 """
     train(model, batchview; epochs=10, sparsify=false, α=0.002)
@@ -25,10 +26,15 @@ function train(model, bw; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses 
         Juno.@progress "Epoch $(epoch)" for (i, x) in enumerate(bw)
             λi = Float32(min(λi + λ/2000,λ))
             gs = Flux.gradient(ps) do
-                l1,l2,l3 = loss(model, x)
-                push!(losses, Flux.data.((l1/var(x),l2,l3)))
-                yield()
-                λi*l1+l2+l3
+                l = loss(model, x)
+                if l isa Tuple
+                    l1,l2,l3 = l
+                    push!(losses, Flux.data.((l1/var(x),l2,l3)))
+                    return l1+l2+l3
+                else
+                    push!(losses, Flux.data(l/var(x)))
+                    return l
+                end
             end
             # i % 3 == 0 && error()
             # i % 100 == 0 && GC.gc();
