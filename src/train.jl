@@ -35,7 +35,7 @@ function train(model, dataset; epochs=10, sparsify, α=0.002, opt = ADAM(α), lo
             Flux.Optimise.update!(opt, ps, gs)
             if i % plotinterval == 0
                 supergc()
-                ongpu(model) && CuArrays.BinnedPool.reclaim(true)
+                # ongpu(model) && CuArrays.BinnedPool.reclaim(true)
                 # CuArrays.reclaim(true)
                 plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...) |> display
             end

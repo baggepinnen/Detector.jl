@@ -60,7 +60,7 @@ function loss(model::MixtureAutoencoder, x, losses)
     X           = maybegpu(model, x)
     Z,M         = encode(model, X)
     Xh          = decode(model, (Z,M))
-    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
+    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X)/size(X,4))
     le, state   = longterm_entropy(M, model.state)
     model.state = state
     ie          = mean(vectorent(M) for M in eachcol(M))
@@ -68,26 +68,28 @@ function loss(model::MixtureAutoencoder, x, losses)
     ltarget = Float32(scalarent(1/size(M,1))*size(M,1)/2)
     # λi = controller(λi, Flux.data(l), Flux.data(ie), 1.001f0)
     # λl = controller(λl, ltarget, Flux.data(le), 1/1.001f0)
-    λi = controller(λi, Flux.data(l), Flux.data(ie), 0.001f0)
+    λi = controller(λi, ltarget/10, Flux.data(ie), 0.001f0)
     λl = controller(λl, ltarget, Flux.data(le), -0.001f0)
-    model.weights = (λi,λl)
+    # @show model.weights = (λi,λl)
     push!(losses, Flux.data.((l/var(x),ie,le)))
     l, λi*ie, -λl*le
+    # l, ie, -4*le
     # l, ie, -le
 end
 
 # controller(λ,a,b,k) = max(b > a ? k*λ : λ/k, 0.001f0)
-controller(λ,a,b,k) = max(λ - k*(a-b), 0.001f0)
+controller(λ,a,b,k) = clamp(λ - k*(a-b), 0.001f0, 100f0)
 
 counter = 0
 function longterm_entropy(Zn, state, λ=0.95f0)
     global counter += 1
-    for Zn in eachcol(Zn)
-        state = (1-λ)*Zn + λ*state |> x-> x./sum(x)
-    end
+    # for Zn in eachcol(Zn)
+    #     state = (1-λ)*Zn + λ*state |> x-> x./sum(x)
+    # end
+    state = (1-λ)*vec(mean(Zn, dims=2)) + λ*state |> x-> x./sum(x)
     ent   = vectorent(state)
     # state.tracker.f = Tracker.Call(nothing, ())
-    if counter == 25
+    if counter >= 50
         state = Flux.param(state.data)
         counter = 0
     end
@@ -160,8 +162,7 @@ function encode(model, X, sparsify)
     X = maybegpu(model,X)
     X = reshape(X, size(X,1), 1, 1, :)
     Z = model[1:encoderlength(model)](X)
-    # sparsify ? oneactive(Z) : Z
-    Z
+    sparsify ? oneactive(Z) : Z
 end
 
 decode(model, Z) = model[encoderlength(model)+1:end](Z)
