@@ -10,14 +10,15 @@ Base.@kwdef mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
     d::TD
     m::TM
     state::TS
-    weights::TW = (10.0f0,10.0f0)
+    weights::TW = (10.0f0,40.0f0)
 end
 Flux.@treelike MixtureAutoencoder
 (m::MixtureAutoencoder)(x) = autoencode(m,x,true)
 
-preM(Z) = vec(mapcols(norm,reshape(Z,:,size(Z,3))))
-preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(vec(mapcols(norm,reshape(Z,:,size(Z,3)))))
-
+preM_(Z) = reshape(mapcols(norm,reshape(Z,size(Z,1),:)), size(Z,3), size(Z,4))
+preM(Z) = preM_(Z)
+preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(preM_(Z))
+# Base.delete_method.(methods(preM))
 function MixtureAutoencoder(k)
 
     e = Chain(  Conv((7,1), 1 =>1k, leakyrelu, pad=(0,0)),
@@ -32,7 +33,7 @@ function MixtureAutoencoder(k)
                     ConvTranspose((13,1),  5k=>5k, leakyrelu),
                     ConvTranspose((16,1),  5k=>5k))
     m = Chain(preM, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
-    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (10.0f0,10.0f0))
+    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (10.0f0,40.0f0))
 end
 
 @inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
@@ -44,34 +45,46 @@ function encode(model::MixtureAutoencoder, X, _=true)
     M = model.m(Z)
     (Z, M)
 end
-decode(model::MixtureAutoencoder, (Z, M), _=true) = reshape(model.d(Z), :, size(Z,3)) * M
+using TensorCast
+function decode(model::MixtureAutoencoder, (Z, M), _=true)
+    Zd = dropdims(model.d(Z), dims=2)
+    # @mul E[a,d] := Zd[a,b,d]*M[b,d]
+    dropdims(sum(Zd.*reshape(M,1,size(M)...), dims=2), dims=2)
+end
 
 scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
 CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
 vectorent(x::AbstractArray) = sum(scalarent, x)
 
-function loss(model::MixtureAutoencoder, x)
+function loss(model::MixtureAutoencoder, x, losses)
     X           = maybegpu(model, x)
     Z,M         = encode(model, X)
     Xh          = decode(model, (Z,M))
     l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
     le, state   = longterm_entropy(M, model.state)
     model.state = state
-    ie = vectorent(M)
-    λi,λl = model.weights
-    λi += Flux.data(0.0001f0*(ie-l))
-    λl += Flux.data(0.0001f0*(le-l))
+    ie          = mean(vectorent(M) for M in eachcol(M))
+    λi,λl       = model.weights
+    ltarget = Float32(scalarent(1/size(M,1))*size(M,1)/2)
+    # λi = controller(λi, Flux.data(l), Flux.data(ie), 1.001f0)
+    # λl = controller(λl, ltarget, Flux.data(le), 1/1.001f0)
+    λi = controller(λi, Flux.data(l), Flux.data(ie), 0.001f0)
+    λl = controller(λl, ltarget, Flux.data(le), -0.001f0)
     model.weights = (λi,λl)
+    push!(losses, Flux.data.((l/var(x),ie,le)))
     l, λi*ie, -λl*le
     # l, ie, -le
 end
 
-
+# controller(λ,a,b,k) = max(b > a ? k*λ : λ/k, 0.001f0)
+controller(λ,a,b,k) = max(λ - k*(a-b), 0.001f0)
 
 counter = 0
 function longterm_entropy(Zn, state, λ=0.95f0)
     global counter += 1
-    state = (1-λ)*Zn + λ*state |> x-> x./sum(x)
+    for Zn in eachcol(Zn)
+        state = (1-λ)*Zn + λ*state |> x-> x./sum(x)
+    end
     ent   = vectorent(state)
     # state.tracker.f = Tracker.Call(nothing, ())
     if counter == 25
@@ -132,11 +145,12 @@ autoencode(model,x, sparsify) = decode(model,encode(model, x, sparsify))
 # Standard model
 ongpu(m) = m[1].bias.data isa CuArray
 
-function loss(model, x)
+function loss(model, x, losses)
     X  = gpu(x)
     Z  = encode(model, X, true)
     Xh = decode(model, Z)
     l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
+    push!(losses, Flux.data(l/var(x)))
     l
 end
 
