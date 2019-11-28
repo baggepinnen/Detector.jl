@@ -25,7 +25,7 @@ lossvec(odel::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
 
 `α` is the stepsize.
 """
-function train(model, dataset; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses = lossvec(model), λ=1, plotinterval=length(dataset)÷2, saveinterval=epochs÷2, kwargs...)
+function train(model, dataset; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses = lossvec(model), λ=1, plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
     ps = Flux.params(model)
     Flux.testmode!(model)
 

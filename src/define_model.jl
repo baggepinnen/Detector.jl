@@ -5,12 +5,12 @@ const k2 = 3
 
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 
-Base.@kwdef mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
+mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
     e::TE
     d::TD
     m::TM
     state::TS
-    weights::TW = (10.0f0,40.0f0)
+    weights::TW
 end
 Flux.@treelike MixtureAutoencoder
 (m::MixtureAutoencoder)(x) = autoencode(m,x,true)
@@ -22,18 +22,25 @@ preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(preM_(Z))
 function MixtureAutoencoder(k)
 
     e = Chain(  Conv((7,1), 1 =>1k, leakyrelu, pad=(0,0)),
+                BatchNorm(1k),
                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
+                BatchNorm(1k),
                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
+                BatchNorm(1k),
                 Conv((11,1), 1k=>1k, leakyrelu, dilation=4, pad=(0,0), stride=2),
+                BatchNorm(1k),
                 Conv((11,1), 1k=>5k,            pad=(0,0), stride=2),
                     )
     d = Chain(ConvTranspose((11,1), 5k=>5k, leakyrelu, stride=2),
                     ConvTranspose((13,1), 5k=>5k, leakyrelu, dilation=3, stride=2),
+                    BatchNorm(5k),
                     ConvTranspose((13,1), 5k=>5k, leakyrelu, stride=2),
+                    BatchNorm(5k),
                     ConvTranspose((13,1),  5k=>5k, leakyrelu),
+                    BatchNorm(5k),
                     ConvTranspose((16,1),  5k=>5k))
     m = Chain(preM, Dense(5k, 5k, relu), Dense(5k, 5k, tanh), Dense(5k, 5k), softmax) # Dont put relu here to avoid outputting hard 0
-    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (10.0f0,40.0f0))
+    MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (40.0f0,40.0f0))
 end
 
 @inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
@@ -49,7 +56,8 @@ using TensorCast
 function decode(model::MixtureAutoencoder, (Z, M), _=true)
     Zd = dropdims(model.d(Z), dims=2)
     # @mul E[a,d] := Zd[a,b,d]*M[b,d]
-    dropdims(sum(Zd.*reshape(M,1,size(M)...), dims=2), dims=2)
+    Xh = dropdims(sum(Zd.*reshape(M,1,size(M)...), dims=2), dims=2)
+    Xh = reshape(Xh, size(Xh,1), 1, 1, :)
 end
 
 scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
@@ -60,7 +68,8 @@ function loss(model::MixtureAutoencoder, x, losses)
     X           = maybegpu(model, x)
     Z,M         = encode(model, X)
     Xh          = decode(model, (Z,M))
-    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X)/size(X,4))
+    # @show size.((X,x,Z,M,Xh))
+    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
     le, state   = longterm_entropy(M, model.state)
     model.state = state
     ie          = mean(vectorent(M) for M in eachcol(M))
@@ -68,9 +77,9 @@ function loss(model::MixtureAutoencoder, x, losses)
     ltarget = Float32(scalarent(1/size(M,1))*size(M,1)/2)
     # λi = controller(λi, Flux.data(l), Flux.data(ie), 1.001f0)
     # λl = controller(λl, ltarget, Flux.data(le), 1/1.001f0)
-    λi = controller(λi, ltarget/10, Flux.data(ie), 0.001f0)
-    λl = controller(λl, ltarget, Flux.data(le), -0.001f0)
-    # @show model.weights = (λi,λl)
+    λi = controller(λi, ltarget/10, Flux.data(ie), 0.01f0)
+    λl = controller(λl, ltarget, Flux.data(le), -0.01f0)
+    model.weights = (λi,λl)
     push!(losses, Flux.data.((l/var(x),ie,le)))
     l, λi*ie, -λl*le
     # l, ie, -4*le
@@ -109,24 +118,24 @@ function sparsify_wta!(Zc)
 end
 encoderlength(model::MixtureAutoencoder) = length(model)-1
 
-function sparsify_channels!(Zc)
-    @inbounds for bi in 1:size(Zc,4)
-        i = 0
-        am = 0.
-        for ci in 1:size(Zc,3)
-            a = sum(abs, @view(Zc[:,:,ci,bi]))
-            if a > am
-                am = a
-                i = ci
-            end
-        end
-        rand() < 0.01 && @show i
-        # acts = vec(sum(abs, @view(Zc[:,:,:,bi]), dims=1))
-        # i = argmax(acts)
-        Zc[:,:,:,bi] .= 0.1randn(size(Zc)[1:3]...)
-        Zc[:,:,i,bi] .= 1
-    end
-end
+# function sparsify_channels!(Zc)
+#     @inbounds for bi in 1:size(Zc,4)
+#         i = 0
+#         am = 0.
+#         for ci in 1:size(Zc,3)
+#             a = sum(abs, @view(Zc[:,:,ci,bi]))
+#             if a > am
+#                 am = a
+#                 i = ci
+#             end
+#         end
+#         rand() < 0.01 && @show i
+#         # acts = vec(sum(abs, @view(Zc[:,:,:,bi]), dims=1))
+#         # i = argmax(acts)
+#         Zc[:,:,:,bi] .= 0.1randn(size(Zc)[1:3]...)
+#         Zc[:,:,i,bi] .= 1
+#     end
+# end
 
 function oneactive(Z)
     Zc = cpu(Flux.data(Z))
