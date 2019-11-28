@@ -48,16 +48,15 @@ dataset = ChannelDiskDataProvider{Vector{Float32}, Nothing}((1second,), 12, 120,
 t   = start_reading(dataset) # This will start the bufering of the dataset
 istaskstarted(t) && !istaskfailed(t) && wait(dataset)
 bw  = batchview(dataset) # This can now be used as a normal batchview
-x,y = first(bw)
+x = first(bw)
 ```
 
 ## Train the detector
 ```julia
 using Flux, BSON
-model = Detector.model
-sparsify = true
-Detector.encode(model,x, sparsify) # This will give you the latent channels of x
-Detector.train(model, batchview(dataset), epochs=5, sparsify=sparsify) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
+model = Detector.AutoEncoder(2, sparsify=true)
+Detector.encode(model,x) # This will give you the latent channels of x
+Detector.train(model, batchview(dataset), epochs=5) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```
 
@@ -74,7 +73,7 @@ losses        = Detector.train(model, shuffle(tunedataset), epochs=1)
 ```julia
 using Peaks
 model  = Detector.load_model() # Load pre-trained model from disk
-errors = abs_reconstruction_errors(model, dataset, sparsify=sparsify) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
+errors = abs_reconstruction_errors(model, dataset) # This will take a couple of minutes if done on a large dataset (about half the time of a training epoch)
 m,proms = peakprom(errors, Maxima(),1000) # Find peaks in signal
 plot(errors);scatter!(m,errors[m], m=(:red, 3), ylabel="Errors", legend=false)
 save_interesting(dataset, m, contextwindow=1) # This will save the interesting clips to a folder on disk
@@ -87,7 +86,7 @@ The call to `save_interesting` will save all interesting files to disk in wav fo
 The idea here is to look at the features that ar least activated. When thos features are activated, it means there is something rare in the signal. I did not get great results with this method, it tended to only pick events of one particular type, in my case, a snapping insect.
 ```julia
 using Peaks
-F = feature_activations(model, dataset, sparsify=sparsify)
+F = feature_activations(model, dataset)
 acts = mean(abs, F, dims=2)[:]
 least_activated_featureinds = sortperm(acts)
 least_activated_features = F[least_activated_featureinds[1:8], :]

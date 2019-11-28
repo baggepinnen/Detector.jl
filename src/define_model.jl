@@ -3,8 +3,19 @@ using Flux: data
 const k = 20
 const k2 = 3
 
+# generic ======================================================================
+# function encode(model, X, sparsify)
+#     cpu(data(encode(model, maybegpu(model,X), sparsify)))
+# end
+# function autoencode(model,x, sparsify)
+#     decode(model,encode(model, maybegpu(model,x), sparsify)) |> data |> cpu
+# end
+
+autoencode(model,x) = decode(model,encode(model, x))
+ongpu(m) = m[1].bias.data isa CuArray
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 
+# Mixture ======================================================================
 mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
     e::TE
     d::TD
@@ -13,7 +24,7 @@ mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
     weights::TW
 end
 Flux.@treelike MixtureAutoencoder
-(m::MixtureAutoencoder)(x) = autoencode(m,x,true)
+(m::MixtureAutoencoder)(x) = autoencode(m,x)
 
 preM_(Z) = reshape(mapcols(norm,reshape(Z,size(Z,1),:)), size(Z,3), size(Z,4))
 preM(Z) = preM_(Z)
@@ -45,15 +56,14 @@ end
 
 @inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
 
-encoderlength(model::MixtureAutoencoder) = length(model.ae) - 1
-function encode(model::MixtureAutoencoder, X, _=true)
+function encode(model::MixtureAutoencoder, X)
     X = reshape(maybegpu(model,X), size(X,1), 1, 1, :)
     Z = model.e(X)
     M = model.m(Z)
     (Z, M)
 end
-using TensorCast
-function decode(model::MixtureAutoencoder, (Z, M), _=true)
+
+function decode(model::MixtureAutoencoder, (Z, M))
     Zd = dropdims(model.d(Z), dims=2)
     # @mul E[a,d] := Zd[a,b,d]*M[b,d]
     Xh = dropdims(sum(Zd.*reshape(M,1,size(M)...), dims=2), dims=2)
@@ -106,17 +116,30 @@ function longterm_entropy(Zn, state, λ=0.95f0)
     ent, state
 end
 
+
+# ==============================================================================
+# Standard model
+
+struct AutoEncoder{TE,TD}
+    e::TE
+    d::TD
+    sparsify::Bool
+end
+
+Flux.@treelike AutoEncoder
+(m::AutoEncoder)(x) = autoencode(m,x)
+ongpu(m::AutoEncoder) = m.e[1].bias.data isa CuArray
+
 function sparsify_wta!(Zc)
     @inbounds for bi in 1:size(Zc,4)
         for ci in 1:size(Zc,3)
             a = argmax(abs.(@view(Zc[:,:,ci,bi]))[:])
-            Zc[:,:,ci,bi] .= 0.01 .* randn.()
+            Zc[:,:,ci,bi] .= Float32(0.01 .* randn.())
             Zc[a,:,ci,bi] .= 1
         end
     end
-    # sum(Zc, dims=1:3)
 end
-encoderlength(model::MixtureAutoencoder) = length(model)-1
+
 
 # function sparsify_channels!(Zc)
 #     @inbounds for bi in 1:size(Zc,4)
@@ -143,72 +166,54 @@ function oneactive(Z)
     Z = gpu(Zc) .* Z
 end
 
-# generic ======================================================================
-# function encode(model, X, sparsify)
-#     cpu(data(encode(model, maybegpu(model,X), sparsify)))
-# end
-# function autoencode(model,x, sparsify)
-#     decode(model,encode(model, maybegpu(model,x), sparsify)) |> data |> cpu
-# end
 
-autoencode(model,x, sparsify) = decode(model,encode(model, x, sparsify))
-# ==============================================================================
-# Standard model
-ongpu(m) = m[1].bias.data isa CuArray
-
-function loss(model, x, losses)
-    X  = gpu(x)
-    Z  = encode(model, X, true)
+function loss(model::AutoEncoder, x, losses)
+    X  = maybegpu(model,x)
+    Z  = encode(model, X)
     Xh = decode(model, Z)
-    l = sum(abs2.(robust_error(X,Xh))) * 1 // length(X)
+    l = sum(abs.(robust_error(X,Xh))) * Float32(1 / length(X))
     push!(losses, Flux.data(l/var(x)))
     l
 end
 
 
-encoderlength(model) = length(model) ÷ 2
-function encode(model, X, sparsify)
+function encode(model::AutoEncoder, X)
     X = maybegpu(model,X)
     X = reshape(X, size(X,1), 1, 1, :)
-    Z = model[1:encoderlength(model)](X)
-    sparsify ? oneactive(Z) : Z
+    Z = model.e(X)
+    model.sparsify ? oneactive(Z) : Z
 end
 
-decode(model, Z) = model[encoderlength(model)+1:end](Z)
-# model = Chain(
-#                 Conv((7,1), 1 =>1k, relu, pad=(3,0)),
-#                 Conv((7,1), 1k=>1k, relu, pad=(3,0)),
-#                 Conv((7,1), 1k=>2k, relu, pad=(3,0)),
-#                 Conv((7,1), 2k=>3k, relu, pad=(3,0)),
-#                 Conv((7,1), 3k=>2k, relu, pad=(3,0)),
-#                 Conv((7,1), 2k=>1k, relu, pad=(3,0)),
-#                 Conv((7,1), 1k=>1k, relu, pad=(3,0)),
-#                 Conv((7,1), 1k=>1,        pad=(3,0))
-#                 )
-function __init__()
+decode(model::AutoEncoder, Z) = model.d(Z)
+
+
+function AutoEncoder(k; sparsify=true)
 
      # @require CuArrays="3a865a2d-5b23-5a0f-bc46-62713ec82fae"
 
     # The model definition must be done at init time since it contains pointers to CuArrays on the GPU, ref https://github.com/JuliaPy/PyCall.jl#using-pycall-from-julia-modules
+    e = Chain(
+            Conv((51,1), 1 =>1k, leakyrelu, pad=(1,0)),
+            Conv((21,1), 1k=>1k, leakyrelu, pad=(1,0)),
+            Conv((11,1), 1k=>1k, leakyrelu, stride=3),
+            BatchNorm(1k),
+            Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+            Conv((11,1), 1k=>4k,            pad=(0,0), stride=3))
+    d = Chain(
+            ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
+            ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+            BatchNorm(1k),
+            ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=3),
+            ConvTranspose((21,1),  1k=>1k, leakyrelu, pad=(0,0)),
+            ConvTranspose((48,1),  1k=>1,            pad=(0,0)))
+
+
     # global model = Chain(
-    #                 Conv((7,1), 1 =>1k, leakyrelu, pad=(2,0)),
-    #                 Conv((11,1), 1k=>1k, leakyrelu, pad=(0,0)),
-    #                 Conv((11,1), 1k=>1k, leakyrelu, stride=2),
-    #                 Conv((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
-    #                 Conv((11,1), 1k=>4k,            pad=(0,0), stride=2),
-    #                 ConvTranspose((11,1), 4k=>1k, leakyrelu, pad=(0,0), stride=3),
-    #                 ConvTranspose((11,1), 1k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=2),
-    #                 ConvTranspose((11,1), 1k=>1k, leakyrelu, pad=(0,0), stride=2),
-    #                 ConvTranspose((11,1),  1k=>1k, leakyrelu, pad=(0,0)),
-    #                 ConvTranspose((24,1),  1k=>1,            pad=(0,0)),
+    #                 Conv((11,1), 1 =>1k2,  leakyrelu, pad=(15,0), dilation=(3,1)),
+    #                 Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
+    #                 Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
+    #                 Conv((11,1), 1k2=>5k2,            pad=(15,0), dilation=(3,1)),
+    #                 Conv((11,1), 5k2=>1,      pad=(15,0), dilation=(3,1)),
     #                 )
-
-
-    global model = Chain(
-                    Conv((11,1), 1 =>1k2,  leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k2=>1k2, leakyrelu, pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 1k2=>5k2,            pad=(15,0), dilation=(3,1)),
-                    Conv((11,1), 5k2=>1,      pad=(15,0), dilation=(3,1)),
-                    )
+    AutoEncoder(e,d,sparsify)
 end

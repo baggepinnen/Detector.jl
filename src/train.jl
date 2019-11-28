@@ -21,29 +21,25 @@ lossvec(::Any) = Float32[]
 lossvec(odel::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
 
 """
-    train(model, batchview; epochs=10, sparsify=false, α=0.002)
+    train(model, batchview; epochs=10, α=0.002)
 
 `α` is the stepsize.
 """
-function train(model, dataset; epochs=10, sparsify, α=0.002, opt = ADAM(α), losses = lossvec(model), λ=1, plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
+function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = lossvec(model), plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
     ps = Flux.params(model)
     Flux.testmode!(model)
 
-    λi = 1e-10
 
     Juno.@progress "Epochs" for epoch = 1:epochs
         Flux.testmode!(model, false)
         Juno.@progress "Epoch $(epoch)" for (i, x) in enumerate(dataset)
-            λi = Float32(min(λi + λ/2000,λ))
             gs = Flux.gradient(ps) do
                 l = loss(model, x, losses)
                 l isa Tuple ? +(l...) : l
             end
             Flux.Optimise.update!(opt, ps, gs)
             if i % plotinterval == 0
-                supergc()
-                # ongpu(model) && CuArrays.BinnedPool.reclaim(true)
-                # CuArrays.reclaim(true)
+                GC.gc()
                 plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...) |> display
             end
         end
