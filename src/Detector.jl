@@ -69,22 +69,17 @@ function feature_activations(model, dataset; sparsify)
 end
 
 
-nf = second÷5
-const errorf = gpu(MeanPool((nf,1)))
 function abs_reconstruction_errors(model, dataset; sparsify)
-    map(dataset) do x
-        CuArrays.reclaim(true)
+    e = map(dataset) do x
         X = gpu(x[:,:,:,:])
         Xh = autoencode(model,X,sparsify)
         ae = abs.(robust_error(X,Xh)) |> Flux.data
-        try
-            ae = errorf(ae)
-        catch
-            return 0.
+        map(eachcol(ae)) do ae
+            quantile(cpu(vec(ae)), 0.90)
         end
-        quantile(cpu(vec(ae)), 0.90)
         # mean(abs,X - autoencode(model,X,false)) |> Flux.data |> cpu
     end
+    reduce(vcat,e)
 end
 
 function reconstruction_error(model, x::AbstractArray{<:Real}; sparsify)
