@@ -1,8 +1,15 @@
 function robust_error(X,Xh)
+    # @show size(X)
+    if ndims(X) > 2
+        X = dropdims(X,dims=(2,3))
+    end
+    if ndims(Xh) > 2
+        Xh = dropdims(Xh,dims=(2,3))
+    end
     if size(Xh,1) != size(X,1)
         # @warn "Got unequal sizes"
         m = min(size(Xh,1), size(X,1))
-        return Xh[1:m,:,:,:].-X[1:m,:,:,:]
+        return Xh[1:m,:].-X[1:m,:]
     end
     Xh.-X
 end
