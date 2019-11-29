@@ -17,7 +17,13 @@ ongpu(m) = m[1].bias.data isa CuArray
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 @inline maybegpu(model, x::CuArray) = x
 @inline maybegpu(model, x::TrackedCuArray) = x
-
+@inline function maybegpu(model, xy::Tuple)
+    ongpu(model) || return xy
+    x,y = xy
+    X   = gpu(x)
+    Y   = gpu(y)
+    (X,Y)
+end
 
 function loss(model, x, losses)
     X = maybegpu(model, x)
@@ -84,9 +90,7 @@ CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
 vectorent(x::AbstractArray) = sum(scalarent, x)
 
 function loss(model::MixtureAutoencoder, xy::Tuple, losses)
-    x,y         = xy
-    X           = maybegpu(model, x)
-    Y           = maybegpu(model, y)
+    X,Y         = maybegpu(model, xy)
     Z,M         = encode(model, X)
     Xh          = decode(model, (Z,M))
     # @show size.((X,x,Z,M,Xh))
@@ -129,7 +133,7 @@ end
 
 
 # ==============================================================================
-# Standard model
+# AutoEncoder
 
 struct AutoEncoder{TE,TD}
     e::TE
@@ -178,12 +182,10 @@ function oneactive(Z)
 end
 
 function loss(model::AutoEncoder, xy::Tuple, losses)
-    x,y = xy
-    X  = maybegpu(model, x)
-    Y  = maybegpu(model, y)
-    Z  = encode(model, X)
-    Xh = decode(model, Z)
-    l  = sum(abs.(robust_error(Y,Xh))) * Float32(1 / length(X))
+    X,Y = maybegpu(model, xy)
+    Z   = encode(model, X)
+    Xh  = decode(model, Z)
+    l   = sum(abs.(robust_error(Y,Xh))) * Float32(1 / length(X))
     push!(losses, Flux.data(l/var(Y)))
     l
 end
@@ -228,4 +230,59 @@ function AutoEncoder(k; sparsify=true)
     #                 Conv((11,1), 5k2=>1,      pad=(15,0), dilation=(3,1)),
     #                 )
     AutoEncoder(e,d,sparsify)
+end
+
+
+
+# Residual encoder =============================================================
+batchvec(x) = reshape(x,:,size(x,ndims(x)))
+
+struct ResidualEncoder
+    ae
+    fc
+end
+function ResidualEncoder(k::Int, k2::Int; sparsify=true)
+    ae = AutoEncoder(k; sparsify=sparsify)
+    fc = Chain(
+                Conv((21,1), 1 =>1k, leakyrelu),
+                MaxPool((6,1)),
+                BatchNorm(1k),
+                Conv((11,1), 1k =>1k, leakyrelu, stride=4),
+                MaxPool((6,1)),
+                BatchNorm(1k),
+                Conv((11,1), 1k=>1k, leakyrelu, stride=4),
+                MaxPool((6,1)),
+                BatchNorm(1k),
+                Conv((11,1), 1k=>1k, leakyrelu, stride=4),
+                batchvec,
+                Dense(k2,10k,relu),
+                BatchNorm(10k),
+                Dense(10k,5k,tanh),
+                Dense(5k,1,σ),
+    )
+    ResidualEncoder(ae,fc)
+end
+
+Flux.@treelike ResidualEncoder
+ongpu(m::ResidualEncoder) = ongpu(m.ae)
+CuArrays.@cufunc Flux.binarycrossentropy(ŷ, y; ϵ=eps(ŷ)) = -y*log(ŷ + ϵ) - (1 - y)*log(1 - ŷ + ϵ)
+function loss(model::ResidualEncoder, xyl::Tuple, losses)
+    X,Y = maybegpu(model, (xyl[1], xyl[2]))
+    lab = xyl[3]
+    Z   = encode(model, X)
+    Xh  = decode(model, Z)
+    E   = robust_error(Y,Xh)
+    rl  = sum(abs.(E)) * Float32(1 / length(X))
+    cl  = sum(Flux.binarycrossentropy.(model.fc(reshape(E,:,1,1,size(E,2))), lab))
+    push!(losses, (Flux.data(rl/var(Y)), Flux.data(cl)))
+    rl, 0.01cl
+end
+encode(model::ResidualEncoder, X) = encode(model.ae, X)
+decode(model::ResidualEncoder, Z) = decode(model.ae, Z)
+function classify(model::ResidualEncoder, x)
+    X  = maybegpu(model, x)
+    Z  = encode(model, X)
+    Xh = decode(model, Z)
+    E  = robust_error(X,Xh)
+    model.fc(reshape(E,:,1,1,size(E,2)))
 end
