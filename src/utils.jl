@@ -82,6 +82,16 @@ end
 #         end
 #     end
 # end
+"""
+Example
+```
+using MLBase
+rocs = roc(labels,sortperm(errors),200)
+rocplot(rocs)
+```
+"""
+rocplot
+
 @userplot Rocplot
 @recipe function plot(h::Rocplot)
     rocres = h.args[1]

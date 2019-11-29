@@ -11,9 +11,18 @@ const k2 = 3
 #     decode(model,encode(model, maybegpu(model,x), sparsify)) |> data |> cpu
 # end
 
+const TrackedCuArray = TrackedArray{<:Any, <:Any, <:CuArray}
 autoencode(model,x) = decode(model,encode(model, x))
 ongpu(m) = m[1].bias.data isa CuArray
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
+@inline maybegpu(model, x::CuArray) = x
+@inline maybegpu(model, x::TrackedCuArray) = x
+
+
+function loss(model, x, losses)
+    X = maybegpu(model, x)
+    loss(model, (X,X), losses)
+end
 
 # Mixture ======================================================================
 mutable struct MixtureAutoencoder{TE,TD,TM,TS,TW}
@@ -28,7 +37,7 @@ Flux.@treelike MixtureAutoencoder
 
 preM_(Z) = reshape(mapcols(norm,reshape(Z,size(Z,1),:)), size(Z,3), size(Z,4))
 preM(Z) = preM_(Z)
-preM(Z::TrackedArray{<:Any, <:Any, <:CuArray}) where T = gpu(preM_(Z))
+preM(Z::TrackedCuArray) where T = gpu(preM_(Z))
 # Base.delete_method.(methods(preM))
 function MixtureAutoencoder(k)
 
@@ -74,12 +83,14 @@ scalarent(x::Real) =                  -log(x + Float32(1e-6))*x
 CuArrays.@cufunc scalarent(x::Real) = -log(x + Float32(1e-6))*x
 vectorent(x::AbstractArray) = sum(scalarent, x)
 
-function loss(model::MixtureAutoencoder, x, losses)
+function loss(model::MixtureAutoencoder, xy::Tuple, losses)
+    x,y         = xy
     X           = maybegpu(model, x)
+    Y           = maybegpu(model, y)
     Z,M         = encode(model, X)
     Xh          = decode(model, (Z,M))
     # @show size.((X,x,Z,M,Xh))
-    l           = sum(abs2.(robust_error(X,Xh))) * Float32(1 / length(X))
+    l           = sum(abs2.(robust_error(Y,Xh))) * Float32(1 / length(X))
     le, state   = longterm_entropy(M, model.state)
     model.state = state
     ie          = mean(vectorent(M) for M in eachcol(M))
@@ -90,7 +101,7 @@ function loss(model::MixtureAutoencoder, x, losses)
     λi = controller(λi, ltarget/10, Flux.data(ie), 0.01f0)
     λl = controller(λl, ltarget, Flux.data(le), -0.01f0)
     model.weights = (λi,λl)
-    push!(losses, Flux.data.((l/var(x),ie,le)))
+    push!(losses, Flux.data.((l/var(Y),ie,le)))
     l, λi*ie, -λl*le
     # l, ie, -4*le
     # l, ie, -le
@@ -166,13 +177,14 @@ function oneactive(Z)
     Z = gpu(Zc) .* Z
 end
 
-
-function loss(model::AutoEncoder, x, losses)
-    X  = maybegpu(model,x)
+function loss(model::AutoEncoder, xy::Tuple, losses)
+    x,y = xy
+    X  = maybegpu(model, x)
+    Y  = maybegpu(model, y)
     Z  = encode(model, X)
     Xh = decode(model, Z)
-    l = sum(abs.(robust_error(X,Xh))) * Float32(1 / length(X))
-    push!(losses, Flux.data(l/var(x)))
+    l  = sum(abs.(robust_error(Y,Xh))) * Float32(1 / length(X))
+    push!(losses, Flux.data(l/var(Y)))
     l
 end
 
