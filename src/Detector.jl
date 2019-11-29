@@ -69,9 +69,10 @@ function feature_activations(model, dataset)
 end
 
 
-function abs_reconstruction_errors(model, dataset; th=0.90)
+function abs_reconstruction_errors(model, dataset; th=0.70)
     e = map(dataset) do x
-        X = gpu(x[:,:,:,:])
+        x = x isa Tuple ? x[2] : x
+        X = maybegpu(model, reshape(x,:,1,1,size(x,4)))
         Xh = autoencode(model,X)
         ae = abs.(robust_error(X,Xh)) |> Flux.data
         map(eachcol(ae)) do ae
