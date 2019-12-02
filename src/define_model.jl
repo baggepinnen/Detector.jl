@@ -241,6 +241,9 @@ struct ResidualEncoder
     ae
     fc
 end
+
+(m::ResidualEncoder)(x) = autoencode(m,x)
+
 function ResidualEncoder(k::Int, k2::Int; sparsify=true)
     ae = AutoEncoder(k; sparsify=sparsify)
     fc = Chain(

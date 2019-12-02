@@ -170,18 +170,22 @@ const It = Iterators
 function blockpatch(model, X, npatches=40)
     X = gpu(to4(X))
     Flux.testmode!(model, true)
-    bsx = size(X,1) ÷ npatches
-    bsy = size(X,2) ÷ npatches
+    bsx = max(size(X,1) ÷ npatches, 1)
+    bsy = max(size(X,2) ÷ npatches, 1)
     y0 = model(X) |> data
     mask = similar(X)
     r = map(It.product(It.partition(1:size(X,1), bsx), It.partition(1:size(X,2), bsy))) do (xi,yi)
             mask .= 1
             mask[xi,yi,:,:] .= mean(X[xi,yi,:,:])
             y = model(mask .* X)  |> data
-            cpu(y'y0)[]
+            cpu(dot(y,y0))[]
     end
     r = imfilter(r, Kernel.gaussian(1))
-    plot(heatmap(r, colorbar=false, xaxis=false,yaxis=false), heatmap(cpu(X[:,:,1,1])))
+    if size(X,2) > 1
+        plot(heatmap(r, colorbar=false, xaxis=false,yaxis=false), heatmap(cpu(X[:,:,1,1])))
+    else
+        plot(plot(r, title="Inner product"), plot(cpu(X[:,1,1,1]), title="x"))
+    end
 end
 
 flatten(x) = cpu(data(reshape(x, size(x,1),:)))
@@ -192,8 +196,8 @@ function flattenn(x)
     flatten(x)
 end
 
-function plotgrad(X,class=cpu(onecold(densenet(gpu(X)))[]))
-    model = removegpu(densenetc)
+function plotgrad(model, X,class=cpu(onecold(densenet(gpu(X)))[]))
+    model = removegpu(model)
     Flux.testmode!(model, true)
     g = Flux.gradient(x->model[1:end-1](x)[class], gpu(X))[1] |> data |> cpu
     heatmap(imfilter(abs.(dropdims(g, dims=(3,4))), Kernel.gaussian(2)))
