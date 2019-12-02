@@ -1,22 +1,30 @@
 
-using Flux: data
+# using Flux: identity
 const k = 20
 const k2 = 3
 
 # generic ======================================================================
 # function encode(model, X, sparsify)
-#     cpu(data(encode(model, maybegpu(model,X), sparsify)))
+#     cpu(identity(encode(model, maybegpu(model,X), sparsify)))
 # end
 # function autoencode(model,x, sparsify)
-#     decode(model,encode(model, maybegpu(model,x), sparsify)) |> data |> cpu
+#     decode(model,encode(model, maybegpu(model,x), sparsify)) |> identity |> cpu
 # end
 
-const TrackedCuArray = TrackedArray{<:Any, <:Any, <:CuArray}
+# const TrackedCuArray = TrackedArray{<:Any, <:Any, <:CuArray}
 autoencode(model,x) = decode(model,encode(model, x))
-ongpu(m) = m[1].bias.data isa CuArray
+classify(model, x::Tuple) = classify(model, x[1])
+function classify(identityset)
+    c = map(identityset) do (x,y,l)
+        classify(model,x)' |> identity |> cpu
+    end
+    vec(reduce(vcat, c))
+end
+# ongpu(m) = m[1].bias.identity isa CuArray
+ongpu(m) = m[1].bias isa CuArray
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 @inline maybegpu(model, x::CuArray) = x
-@inline maybegpu(model, x::TrackedCuArray) = x
+# @inline maybegpu(model, x::TrackedCuArray) = x
 @inline function maybegpu(model, xy::Tuple)
     ongpu(model) || return xy
     x,y = xy
@@ -24,6 +32,8 @@ ongpu(m) = m[1].bias.data isa CuArray
     Y   = gpu(y)
     (X,Y)
 end
+
+@inline maybegpu(model, xy::Tuple{Vararg{<:CuArray}}) = xy
 
 function loss(model, x, losses)
     X = maybegpu(model, x)
@@ -43,7 +53,8 @@ Flux.@treelike MixtureAutoencoder
 
 preM_(Z) = reshape(mapcols(norm,reshape(Z,size(Z,1),:)), size(Z,3), size(Z,4))
 preM(Z) = preM_(Z)
-preM(Z::TrackedCuArray) where T = gpu(preM_(Z))
+# preM(Z::TrackedCuArray) where T = gpu(preM_(Z))
+preM(Z::CuArray) where T = gpu(preM_(Z))
 # Base.delete_method.(methods(preM))
 function MixtureAutoencoder(k)
 
@@ -69,7 +80,7 @@ function MixtureAutoencoder(k)
     MixtureAutoencoder(e,d,m,Flux.param(fill(Float32(1/5k), 5k)), (40.0f0,40.0f0))
 end
 
-@inline ongpu(m::MixtureAutoencoder) = m.e[1].bias.data isa CuArray
+@inline ongpu(m::MixtureAutoencoder) = m.e[1].bias isa CuArray
 
 function encode(model::MixtureAutoencoder, X)
     X = reshape(maybegpu(model,X), size(X,1), 1, 1, :)
@@ -100,12 +111,12 @@ function loss(model::MixtureAutoencoder, xy::Tuple, losses)
     ie          = mean(vectorent(M) for M in eachcol(M))
     λi,λl       = model.weights
     ltarget = Float32(scalarent(1/size(M,1))*size(M,1)/2)
-    # λi = controller(λi, Flux.data(l), Flux.data(ie), 1.001f0)
-    # λl = controller(λl, ltarget, Flux.data(le), 1/1.001f0)
-    λi = controller(λi, ltarget/10, Flux.data(ie), 0.01f0)
-    λl = controller(λl, ltarget, Flux.data(le), -0.01f0)
+    # λi = controller(λi, identity(l), identity(ie), 1.001f0)
+    # λl = controller(λl, ltarget, identity(le), 1/1.001f0)
+    λi = controller(λi, ltarget/10, identity(ie), 0.01f0)
+    λl = controller(λl, ltarget, identity(le), -0.01f0)
     model.weights = (λi,λl)
-    push!(losses, Flux.data.((l/var(Y),ie,le)))
+    pushlog!(losses, identity.((l/var(Y),ie,le)))
     l, λi*ie, -λl*le
     # l, ie, -4*le
     # l, ie, -le
@@ -124,7 +135,7 @@ function longterm_entropy(Zn, state, λ=0.95f0)
     ent   = vectorent(state)
     # state.tracker.f = Tracker.Call(nothing, ())
     if counter >= 50
-        state = Flux.param(state.data)
+        state = Flux.param(state.identity)
         counter = 0
     end
     # ent   = sum(state .* log.(state))
@@ -143,7 +154,7 @@ end
 
 Flux.@treelike AutoEncoder
 (m::AutoEncoder)(x) = autoencode(m,x)
-ongpu(m::AutoEncoder) = m.e[1].bias.data isa CuArray
+ongpu(m::AutoEncoder) = m.e[1].bias isa CuArray
 
 function sparsify_wta!(Zc)
     @inbounds for bi in 1:size(Zc,4)
@@ -176,7 +187,7 @@ end
 # end
 
 function oneactive(Z)
-    Zc = cpu(Flux.data(Z))
+    Zc = cpu(identity(Z))
     sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end
@@ -186,7 +197,7 @@ function loss(model::AutoEncoder, xy::Tuple, losses)
     Z   = encode(model, X)
     Xh  = decode(model, Z)
     l   = sum(abs.(robust_error(Y,Xh))) * Float32(1 / length(X))
-    push!(losses, Flux.data(l/var(Y)))
+    pushlog!(losses, identity(l/var(Y)))
     l
 end
 
@@ -277,16 +288,104 @@ function loss(model::ResidualEncoder, xyl::Tuple, losses)
     E   = robust_error(Y,Xh)
     rl  = sum(abs.(E)) * Float32(1 / length(X))
     cl  = sum(Flux.binarycrossentropy.(model.fc(reshape(E,:,1,1,size(E,2))), lab))
-    push!(losses, (Flux.data(rl/var(Y)), Flux.data(cl)))
+    pushlog!(losses, (identity(rl/var(Y)), identity(cl)))
     rl, 0.01cl
 end
 encode(model::ResidualEncoder, X) = encode(model.ae, X)
 decode(model::ResidualEncoder, Z) = decode(model.ae, Z)
-function classify(model::ResidualEncoder, x)
+function classify(model::ResidualEncoder, x::AbstractArray)
     X  = maybegpu(model, x)
     Z  = encode(model, X)
     Xh = decode(model, Z)
     E  = robust_error(X,Xh)
     model.fc(reshape(E,:,1,1,size(E,2)))
 end
-classify(model::ResidualEncoder, x::Tuple) = classify(model, x[1])
+
+
+
+
+
+
+
+# Variational autoencoder ======================================================
+
+mutable struct VAE{TE,TD}
+    e::TE
+    d::TD
+    c::Float32
+    ci::Float32
+end
+Flux.@treelike VAE
+ongpu(m::VAE) = ongpu(m.e)
+
+(m::VAE)(x) = autoencode(m,x)
+
+function VAE(k::Int; c0=.01, ci=0.001)
+    e = Chain(
+            Conv((51,1), 1 =>4k, leakyrelu, pad=(1,0)),
+            Conv((21,1), 4k=>3k, leakyrelu, pad=(1,0)),
+            BatchNorm(3k),
+            Conv((11,1), 3k=>2k, leakyrelu, stride=3),
+            Conv((11,1), 2k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+            BatchNorm(1k),
+            Conv((11,1), 1k=>2,            pad=(0,0), stride=3))
+    d = Chain(
+            ConvTranspose((11,1), 1=>1k, leakyrelu, pad=(0,0), stride=3),
+            BatchNorm(1k),
+            ConvTranspose((11,1), 1k=>2k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+            ConvTranspose((11,1), 2k=>3k, leakyrelu, pad=(0,0), stride=3),
+            BatchNorm(3k),
+            ConvTranspose((21,1),  3k=>4k, leakyrelu, pad=(0,0)),
+            ConvTranspose((48,1),  4k=>1,            pad=(0,0)))
+    VAE(e,d,Float32(c0),Float32(ci))
+end
+
+function loss(model::VAE, xy::Tuple, losses)
+    X,Y = maybegpu(model, xy)
+    Z   = encode(model, X)
+
+    Xh  = decode(model, Z)
+    E   = robust_error(Y,Xh)
+    rl  = sum(abs2.(E)) / length(X)
+    kll = kl(Z) / length(X)
+    model.c = min(1, model.c + model.ci)
+    pushlog!(losses, (identity(rl/var(Y)), identity(kll)))
+    rl, model.c*kll
+end
+encode(model::VAE, X) = model.e(maybegpu(model, X))
+function decode(model::VAE, Z)
+    Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1),1,1,size(Z,4)))
+    model.d(Z)
+end
+
+function kl(Z)
+    μ = Z[:,:,1:1,:]
+    lσ = Z[:,:,2:2,:]
+    σ = CuArrays.exp.(lσ)
+    0.5f0*(sum(abs2.(μ)) + sum(σ)) - sum(lσ)
+    # sum(σ .- lσ .+ abs2.(μ) .- lσ)
+end
+
+decode_kernel(Z1,Z2,r) = Z1 + sqrt(exp(Z2))*r
+CuArrays.@cufunc decode_kernel(Z1,Z2,r) = Z1 + sqrt(exp(Z2))*r
+CuArrays.@cufunc decode_kernel(Z1,Z2) = Z1 + exp(Z2./2)*randn()
+#
+# kl_kernel(μ, σ, lσ) = -lσ + (σ + abs2(μ))/(σ2 + 1f-5)
+# CuArrays.@cufunc kl_kernel(μ, σ, lσ) = -lσ + (σ + μ^2)/(σ2 + 1f-5)
+#
+# function gpukl(l,μ, lσ)
+#     for i in 1:length(μ)
+#         @inbounds l[1] += -lσ[i] + (exp(lσ[i]) + μ[i]^2)/(exp(lσ[i]) + 1f-5)
+#     end
+#     nothing
+# end
+
+# μ1, σ1² = stats(e)
+# lσ1 = log.(sqrt.(σ1²))
+# lσ2 = log.(σ2)#log.(sqrt.(var(dy)))
+# l = 0f0
+# for i = eachindex(μ1)
+#     l += c*2lσ2[i] - 2lσ1[i] +
+#     c*(σ1²[i] + abs2(μ1[i] - μ2[i]))/(σ2[i]^2 + 1f-5)
+# end
+# 0.5f0l

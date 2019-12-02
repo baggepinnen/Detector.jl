@@ -3,6 +3,7 @@ using Statistics, LinearAlgebra, Serialization
 using Base.Threads: @threads, nthreads, threadid, @spawn
 using Base.Iterators
 using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV, LazyWAVFiles, Juno, NNlib, SliceMap
+using Zygote
 using ImageFiltering # Used in utils
 
 export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error
@@ -18,7 +19,7 @@ include("data.jl")
 export second, mapfiles, serializeall_raw, getexamplewhere, confusing_parts, seconds2hms
 
 include("define_model.jl")
-export encode, decode, autoencode, ongpu, maybegpu
+export encode, decode, autoencode, classify, ongpu, maybegpu
 
 include("train.jl")
 

@@ -18,7 +18,9 @@ Base.Matrix(x::Vector{<:Tuple}) = reduce(hcat, getindex.(x,i) for i in eachindex
 Base.Matrix(x::Vector) = x[:,:]
 
 lossvec(::Any) = Float32[]
-lossvec(odel::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
+lossvec(model::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
+
+Zygote.@nograd pushlog!(losses, x) = push!(losses,x)
 
 """
     train(model, batchview; epochs=10, α=0.002)
@@ -27,11 +29,11 @@ lossvec(odel::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
 """
 function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = lossvec(model), plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
     ps = Flux.params(model)
-    Flux.testmode!(model)
+    # Flux.testmode!(model)
 
 
     Juno.@progress "Epochs" for epoch = 1:epochs
-        Flux.testmode!(model, false)
+        # Flux.testmode!(model, false)
         Juno.@progress "Epoch $(epoch)" for (i, x) in enumerate(dataset)
             gs = Flux.gradient(ps) do
                 l = loss(model, x, losses)
@@ -43,7 +45,7 @@ function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = los
                 plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...) |> display
             end
         end
-        Flux.testmode!(model, true)
+        # Flux.testmode!(model, true)
 
         if epoch % saveinterval  == 0
             serialize("$(Dates.now())_$(length(losses)).bin", (cpu(model), opt, losses))
