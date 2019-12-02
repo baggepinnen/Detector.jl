@@ -286,3 +286,4 @@ function classify(model::ResidualEncoder, x)
     E  = robust_error(X,Xh)
     model.fc(reshape(E,:,1,1,size(E,2)))
 end
+classify(model::ResidualEncoder, x::Tuple) = classify(model, x[1])
