@@ -323,9 +323,11 @@ ongpu(m::VAE) = ongpu(m.e)
 function VAE(k::Int; c0=.01, ci=0.001)
     e = Chain(
             Conv((51,1), 1 =>4k, leakyrelu, pad=(1,0)),
+            BatchNorm(4k),
             Conv((21,1), 4k=>3k, leakyrelu, pad=(1,0)),
             BatchNorm(3k),
             Conv((11,1), 3k=>2k, leakyrelu, stride=3),
+            BatchNorm(2k),
             Conv((11,1), 2k=>1k, leakyrelu, dilation=3, pad=(0,0), stride=3),
             BatchNorm(1k),
             Conv((11,1), 1k=>2,            pad=(0,0), stride=3))
@@ -333,9 +335,11 @@ function VAE(k::Int; c0=.01, ci=0.001)
             ConvTranspose((11,1), 1=>1k, leakyrelu, pad=(0,0), stride=3),
             BatchNorm(1k),
             ConvTranspose((11,1), 1k=>2k, leakyrelu, dilation=3, pad=(0,0), stride=3),
+            BatchNorm(2k),
             ConvTranspose((11,1), 2k=>3k, leakyrelu, pad=(0,0), stride=3),
             BatchNorm(3k),
             ConvTranspose((21,1),  3k=>4k, leakyrelu, pad=(0,0)),
+            BatchNorm(4k),
             ConvTranspose((48,1),  4k=>1,            pad=(0,0)))
     VAE(e,d,Float32(c0),Float32(ci))
 end
