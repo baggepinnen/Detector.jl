@@ -6,7 +6,7 @@ using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV,
 using Zygote
 using ImageFiltering # Used in utils
 
-export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error
+export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error, uncertainty
 
 
 include("mel.jl")
@@ -88,6 +88,33 @@ function reconstruction_error(model, x::AbstractArray{<:Real})
     X = gpu(x[:,:,:,:])
     Xh = autoencode(model,X)
     robust_error(X,Xh)|> cpu |> vec
+end
+
+function uncertainty(model, dataset; th=0.50)
+    e = map(dataset) do (X,Y)
+        Z = encode(model,X)[:,1,2,:] .|> exp |> cpu
+        map(eachcol(Z)) do ae
+            quantile(vec(ae), th)
+        end
+    end
+    reduce(vcat,e)
+end
+
+function means(model, dataset; th=0.50)
+    e = map(dataset) do (X,Y)
+        Z = encode(model,X) |> cpu
+        m = abs.(Z[:,1,1,:])
+        s = Z[:,1,2,:]
+        mv = map(eachcol(m)) do x
+            quantile(vec(x), th)
+        end
+        sv = map(eachcol(s)) do x
+            quantile(vec(x), th)
+        end
+        mv,sv
+    end
+    e = reduce(vcat,e)
+    reduce(vcat, first.(e)),reduce(vcat, Base.last.(e))
 end
 
 
