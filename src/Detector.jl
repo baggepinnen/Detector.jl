@@ -74,12 +74,11 @@ function abs_reconstruction_errors(model, dataset; th=0.70)
     e = map(dataset) do x
         x = x isa Tuple ? x[2] : x
         X = maybegpu(model, reshape(x,:,1,1,size(x,4)))
-        Xh = autoencode(model,X)
-        ae = abs.(robust_error(X,Xh)) |> Flux.data
+        Xh = model isa VAE ? autoencode(model,X,false) : autoencode(model,X)
+        ae = abs.(robust_error(X,Xh))
         map(eachcol(ae)) do ae
             quantile(cpu(vec(ae)), th)
         end
-        # mean(abs,X - autoencode(model,X,false)) |> Flux.data |> cpu
     end
     reduce(vcat,e)
 end
@@ -88,7 +87,7 @@ function reconstruction_error(model, x::AbstractArray{<:Real})
     # CuArrays.reclaim(true)
     X = gpu(x[:,:,:,:])
     Xh = autoencode(model,X)
-    robust_error(X,Xh) |> Flux.data |> cpu |> vec
+    robust_error(X,Xh)|> cpu |> vec
 end
 
 

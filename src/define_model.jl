@@ -16,7 +16,7 @@ autoencode(model,x) = decode(model,encode(model, x))
 classify(model, x::Tuple) = classify(model, x[1])
 function classify(identityset)
     c = map(identityset) do (x,y,l)
-        classify(model,x)' |> identity |> cpu
+        classify(model,x)' |> cpu
     end
     vec(reduce(vcat, c))
 end
@@ -116,7 +116,7 @@ function loss(model::MixtureAutoencoder, xy::Tuple, losses)
     λi = controller(λi, ltarget/10, identity(ie), 0.01f0)
     λl = controller(λl, ltarget, identity(le), -0.01f0)
     model.weights = (λi,λl)
-    pushlog!(losses, identity.((l/var(Y),ie,le)))
+    pushlog!(losses, (l/var(Y),ie,le))
     l, λi*ie, -λl*le
     # l, ie, -4*le
     # l, ie, -le
@@ -135,7 +135,8 @@ function longterm_entropy(Zn, state, λ=0.95f0)
     ent   = vectorent(state)
     # state.tracker.f = Tracker.Call(nothing, ())
     if counter >= 50
-        state = Flux.param(state.identity)
+        error("This does not work for Zygote")
+        state = state
         counter = 0
     end
     # ent   = sum(state .* log.(state))
@@ -187,7 +188,7 @@ end
 # end
 
 function oneactive(Z)
-    Zc = cpu(identity(Z))
+    Zc = cpu(Z)
     sparsify_wta!(Zc)
     Z = gpu(Zc) .* Z
 end
@@ -197,7 +198,7 @@ function loss(model::AutoEncoder, xy::Tuple, losses)
     Z   = encode(model, X)
     Xh  = decode(model, Z)
     l   = sum(abs.(robust_error(Y,Xh))) * Float32(1 / length(X))
-    pushlog!(losses, identity(l/var(Y)))
+    pushlog!(losses, l/var(Y))
     l
 end
 
@@ -288,7 +289,7 @@ function loss(model::ResidualEncoder, xyl::Tuple, losses)
     E   = robust_error(Y,Xh)
     rl  = sum(abs.(E)) * Float32(1 / length(X))
     cl  = sum(Flux.binarycrossentropy.(model.fc(reshape(E,:,1,1,size(E,2))), lab))
-    pushlog!(losses, (identity(rl/var(Y)), identity(cl)))
+    pushlog!(losses, (rl/var(Y), cl))
     rl, 0.01cl
 end
 encode(model::ResidualEncoder, X) = encode(model.ae, X)
@@ -353,26 +354,31 @@ function loss(model::VAE, xy::Tuple, losses)
     rl  = sum(abs2.(E)) / length(X)
     kll = kl(Z) / length(X)
     model.c = min(1, model.c + model.ci)
-    pushlog!(losses, (identity(rl/var(Y)), identity(kll)))
+    pushlog!(losses, (rl/var(Y), kll))
     rl, model.c*kll
 end
-encode(model::VAE, X) = model.e(maybegpu(model, X))
-function decode(model::VAE, Z)
-    Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1),1,1,size(Z,4)))
+encode(model::VAE, X) = model.e(X)
+function decode(model::VAE, Z, noise=true)
+    if noise
+        Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1), size(Z,2), 1, size(Z,4)))
+        # Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:])
+    else
+        Z = Z[:,:,1:1,:]
+    end
     model.d(Z)
 end
+autoencode(model::VAE, x, noise=true) = decode(model, encode(model,x), noise)
 
 function kl(Z)
-    μ = Z[:,:,1:1,:]
-    lσ = Z[:,:,2:2,:]
-    σ = CuArrays.exp.(lσ)
-    0.5f0*(sum(abs2.(μ)) + sum(σ)) - sum(lσ)
-    # sum(σ .- lσ .+ abs2.(μ) .- lσ)
+    μ = Z[:,:,1,:]
+    lσ = Z[:,:,2,:]
+    # 0.5f0*(sum(abs2,μ) + sum(exp,lσ)) - sum(lσ)
+    0.5f0*sum(abs2.(μ) .+ exp.(lσ)) - sum(lσ)
 end
 
 decode_kernel(Z1,Z2,r) = Z1 + sqrt(exp(Z2))*r
-CuArrays.@cufunc decode_kernel(Z1,Z2,r) = Z1 + sqrt(exp(Z2))*r
-CuArrays.@cufunc decode_kernel(Z1,Z2) = Z1 + exp(Z2./2)*randn()
+CuArrays.@cufunc decode_kernel(Z1,Z2,r) = Z1 + exp(Z2/2)*r
+CuArrays.@cufunc decode_kernel(Z1,Z2) = Z1 + exp(Z2/2)*randn()
 #
 # kl_kernel(μ, σ, lσ) = -lσ + (σ + abs2(μ))/(σ2 + 1f-5)
 # CuArrays.@cufunc kl_kernel(μ, σ, lσ) = -lσ + (σ + μ^2)/(σ2 + 1f-5)
