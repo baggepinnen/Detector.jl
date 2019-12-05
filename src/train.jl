@@ -1,3 +1,8 @@
+"""
+    robust_error(X, Xh)
+
+Calculates `X-Xh` even if they are not the exactly the same length.
+"""
 function robust_error(X,Xh)
     # @show size(X)
     if ndims(X) > 2
@@ -23,9 +28,19 @@ lossvec(model::MixtureAutoencoder) = Tuple{Float32,Float32,Float32}[]
 Zygote.@nograd pushlog!(losses, x) = push!(losses,x)
 
 """
-    train(model, batchview; epochs=10, α=0.002)
+    train(model, dataset; epochs=10, α=0.002, opt=ADAM(α), losses=lossvec(model), plotinterval=length(dataset) ÷ 2, saveinterval=max(epochs ÷ 2, 1), kwargs...)
 
-`α` is the stepsize.
+Trains a model.
+
+#Arguments:
+- `dataset`: Any iterable datastructure. See readme for examples.
+- `epochs`:
+- `α`: Learning rate if using default optimizer
+- `opt`: Custom Flux optimizer
+- `losses`: A vector to store the losses in. `eltype` depends on model.
+- `plotinterval`: How often (iterations) to plot progress
+- `saveinterval`: Hhow often (epocs) to save a copy of the model to disk
+- `kwargs`: additional kwargs are used to control the plot.
 """
 function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = lossvec(model), plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
     ps = Flux.params(model)
