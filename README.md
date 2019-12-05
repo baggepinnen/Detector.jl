@@ -17,8 +17,7 @@ using Detector
 
 
 ## Preprocess data
-
-All functionality in this package operates on serialized, preprocessed data files. Serialized files are much faster to read than wav, and storing already preprocessed data cuts down on overhead. To create preprocessed files, we use any of the following
+If time-consuming data loading or preprocessing is required, this package can operate on serialized, preprocessed data files. Serialized files are much faster to read than wav, and storing already preprocessed data cuts down on overhead. To create preprocessed files, we use any of the following
 
 ```julia
 using Detector, LazyWAVFiles
@@ -30,6 +29,7 @@ df       = DistributedWAVFile(readpath)
 second   = 48000
 serializeall_raw(savepath, df; segmentlength = 1second)    # Serializes raw audio waveforms, for autoencoding
 ```
+
 
 ## Create a dataset
 For further help using [DiskDataProviders](https://github.com/baggepinnen/DiskDataProviders.jl), see its [documentation]((https://baggepinnen.github.io/DiskDataProviders.jl/latest))
@@ -51,7 +51,43 @@ bw  = batchview(dataset) # This can now be used as a normal batchview
 x = first(bw)
 ```
 
+If preprocessing and data loading is cheap and fast, it may be advicable to instead make use of [LengthChannels](https://github.com/baggepinnen/LengthChannels.jl), example:
+```julia
+using LengthChannels
+files = joinpath.(path, readdir(path))
+function cpubatches(bs, shuf=false, files=files);
+    dataset = LengthChannel{Tuple{Array{Float32,4},Array{Float32,4}}}(length(files)÷bs, 10, spawn=true) do ch
+        batch = Array{Float32,4}(undef, inputsize, 1, 1, bs)
+        bi = 1
+        while true
+            for file in (shuf ? shuffle(files) : files)
+                sound = transform(wavread(file)[1][:, 1])
+                batch[:, 1, 1, bi] .= sound
+                bi += 1
+                if bi > bs
+                    bi = 1
+                    bb = copy(batch)
+                    put!(ch, (bb, bb))
+                end
+            end
+        end
+    end
+end
+function batches(args...)
+    LengthChannel{Tuple{CuArray{Float32,4,Nothing},CuArray{Float32,4,Nothing}}}(cpubatches(args...)) do x
+        X = gpu(x[1])
+        (X,X)
+    end
+end
+dataset = batches(batchsize)
+```
+
 ## Train the detector
+This package provides a selection of different flavors of autoencoders for use as event detectors. The current options are
+- `AutoEncoder`
+- `VAE`
+Below is and example that trains an `AutoEncoder`. The argument to `AutoEncoder` controls the size of the model, bigger is bigger.
+
 ```julia
 using Flux, BSON
 model = Detector.AutoEncoder(2, sparsify=true)
@@ -82,18 +118,30 @@ save_interesting(dataset, m, contextwindow=1) # This will save the interesting c
 
 The call to `save_interesting` will save all interesting files to disk in wav format for you to listen to. The file paths are printed to `stdout`. A file with all the clips concatenated will also be saved. The `contextwindow` parameter determine how many clips before and after an interesting clip will be saved.
 
-## Detection using feature activations
-The idea here is to look at the features that ar least activated. When thos features are activated, it means there is something rare in the signal. I did not get great results with this method, it tended to only pick events of one particular type, in my case, a snapping insect.
+## Detection using VAE latent space
+The latent space encoding of the variational autoencoder has proven useful for detection of interesting events. You may use it like this, where the features `M,U` are derived from the mean and uncertainty in the latent-space encoding of the VAE
+
 ```julia
-using Peaks
-F = feature_activations(model, dataset)
-acts = mean(abs, F, dims=2)[:]
-least_activated_featureinds = sortperm(acts)
-least_activated_features = F[least_activated_featureinds[1:8], :]
-interesting = map(eachrow(least_activated_features)) do feature
-    m,proms = peakprom(feature, Maxima(),1000) # Find peaks in signal
-    m[sortperm(proms, rev=true)[1:20]]
-end
-interesting = unique(reduce(vcat, interesting))
-save_interesting(dataset, interesting)
+using Peaks, MLBase
+M,U = Detector.means(model, batches(10))
+
+m,proms = peakprom(-M, Maxima()) # Find peaks in signal
+promscoreM = zeros(length(labels))
+promscoreM[m] .= proms
+rocsM = roc(labels,-M,500)
+rocsps = roc(labels,promscoreM,500)
+rocplot(rocsM, legend=:bottomright, lab="M auc: $(Detector.auc(rocsM))")
+rocplot!(rocsps, legend=:bottomright, lab="M peaks auc: $(Detector.auc(rocsps))")
+
+m,proms = peakprom(U, Maxima()) # Find peaks in signal
+promscoreU = zeros(length(labels))
+promscoreU[m] .= proms
+rocsU = roc(labels,U,500)
+rocsps = roc(labels,promscoreU,500)
+rocplot!(rocsU, legend=:bottomright, lab="U auc: $(Detector.auc(rocsU))")
+rocplot!(rocsps, legend=:bottomright, lab="U peaks auc: $(Detector.auc(rocsps))")
 ```
+
+![window](figs/roc.svg)
+
+*Note:* detection using peak finding only makes sense if the data is sequential, i.e., samples come from consequtive time windows.
