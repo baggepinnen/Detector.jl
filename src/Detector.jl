@@ -6,7 +6,7 @@ using MLDataUtils, Flux, CuArrays, MLBase, Dates, Random, BSON, Plots, DSP, WAV,
 using Zygote
 using ImageFiltering # Used in utils
 
-export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error, uncertainty
+export save_interesting, save_interesting_concat, feature_activations, abs_reconstruction_errors, reconstruction_error, zerocrossing_rate, means
 
 
 include("mel.jl")
@@ -126,5 +126,21 @@ function means(model, dataset; th=0.50)
     reduce(vcat, first.(e)),reduce(vcat, Base.last.(e))
 end
 
+"""
+    zerocrossing_rate(x)
+    zerocrossing_rate(dataset)
 
+You can probably guess what this does. Accepts vectors, Flux CNN style 4d batched data and iterators of such data.
+"""
+function zerocrossing_rate(x::AbstractVector)
+    mean(abs, DSP.conv(sign.(x), [0.5, -0.5]))
+end
+
+zerocrossing_rate(x::AbstractArray{<:Any, 4}) = mapslices(zerocrossing_rate, x, dims=1)
+
+function zerocrossing_rate(x::AbstractVector{<:AbstractArray{<:Any, 4}})
+    r = map(x) do x
+        vec(mapslices(zerocrossing_rate, x, dims=1))
+    end
+    reduce(vcat, r)
 end
