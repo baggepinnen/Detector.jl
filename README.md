@@ -153,3 +153,17 @@ rocplot!(rocsps, legend=:bottomright, lab="U peaks auc: $(Detector.auc(rocsps))"
 ![window](figs/roc.svg)
 
 *Note:* detection using peak finding only makes sense if the data is sequential, i.e., samples come from consequtive time windows.
+
+## Training a classifier using AE derived features
+Below is a simple example making use of [MLJ.jl](https://github.com/alan-turing-institute/MLJ.jl) to train a supervised random-forest classifier that will tell you whether or not something interesting is detected in a sound sample. This of course requires you to have a labeled dataset, which you may not have. The strategy is nevertheless interesting because you might simulate such a dataset, or you might derive labels using some heuristic and use supervise training to bootstrap yourself into a situation where you have a labeled dataset.
+```julia
+using MLJ, MLJBase, ScientificTypes, CategoricalArrays
+Xfull      = [M U] # These are the features derived above, you may put other features in here as well, such as zero-crossing rate etc.
+Xt         = table(Xfull)
+label      = CategoricalArray(labels)
+tree_model = MLJ.@load DecisionTreeClassifier verbosity=1
+model      = EnsembleModel(atom=tree_model, n=20) # create a forest with 20 trees
+
+e1 = MLJ.evaluate(model, Xt, label, resampling=CV(nfolds=5, shuffle=true), measure=MLJBase.auc, verbosity=1, check_measure=false)
+e1.measurement[]
+```
