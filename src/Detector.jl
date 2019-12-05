@@ -13,7 +13,7 @@ include("mel.jl")
 export melspectrogram, mfcc, mel
 
 include("utils.jl")
-export pool, bp_filter, rocplot, filterplot, confusplot, to2, to4, flatten, typicalinput
+export pool, bp_filter, rocplot, filterplot, confusplot, to2, to4, flatten, typicalinput, auc
 
 include("data.jl")
 export second, mapfiles, serializeall_raw, getexamplewhere, confusing_parts, seconds2hms

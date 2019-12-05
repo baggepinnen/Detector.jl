@@ -92,18 +92,23 @@ rocplot(rocs)
 """
 rocplot
 
-@userplot Rocplot
-@recipe function plot(h::Rocplot)
-    rocres = h.args[1]
+function auc(rocres::Vector{<:ROCNums})
     fpr,tpr = false_positive_rate.(rocres), true_positive_rate.(rocres)
     auc = 0.
     for xi in 1:length(fpr)-1
         auc += (fpr[xi]-fpr[xi+1])*mean(tpr[xi:xi+1])
     end
+    auc
+end
+auc(args...) = auc(roc(args...))
+
+@userplot Rocplot
+@recipe function plot(h::Rocplot)
+    rocres = h.args[1]
     title-->"ROC"
     xlabel-->"False positive rate"
     ylabel-->"True positive rate"
-    label-->"AUC: $(round(auc, digits=4))"
+    label-->"AUC: $(round(auc(rocres), digits=4))"
     @series fpr,tpr
 end
 
