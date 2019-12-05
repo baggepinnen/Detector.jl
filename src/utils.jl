@@ -92,6 +92,12 @@ rocplot(rocs)
 """
 rocplot
 
+"""
+    auc(rocres::Vector{<:ROCNums})
+
+Calculate the area under the receiver operating curve (ROC).
+Use together with `MLBase.roc`.
+"""
 function auc(rocres::Vector{<:ROCNums})
     fpr,tpr = false_positive_rate.(rocres), true_positive_rate.(rocres)
     auc = 0.
@@ -313,6 +319,11 @@ MLBase.precision(r::AbstractMatrix{<: Real}) = true_positive(r) / (true_positive
 # the harmonic mean of recall(r::AbstractMatrix{<: Real}) and precision(r::AbstractMatrix{<: Real}).
 MLBase.f1score(r::AbstractMatrix{<: Real}) = 2 / (1/precision(r) + 1/recall(r))
 
+"""
+    seconds2hms(s)
+
+Print hours minutes and seconds 
+"""
 function seconds2hms(s)
     h = s÷3600
     s -= 3600h

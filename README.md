@@ -17,6 +17,8 @@ using Detector
 
 
 ## Preprocess data
+If data loading and preprocessing is fast and cheap in your application, you may skip this step.
+
 If time-consuming data loading or preprocessing is required, this package can operate on serialized, preprocessed data files. Serialized files are much faster to read than wav, and storing already preprocessed data cuts down on overhead. To create preprocessed files, we use any of the following
 
 ```julia
@@ -32,6 +34,8 @@ serializeall_raw(savepath, df; segmentlength = 1second)    # Serializes raw audi
 
 
 ## Create a dataset
+You may use any iterable data structure as a dataset when training the models in this package. We outline the two strategies we use below
+### Using DiskDataProviders (for heavy data)
 For further help using [DiskDataProviders](https://github.com/baggepinnen/DiskDataProviders.jl), see its [documentation]((https://baggepinnen.github.io/DiskDataProviders.jl/latest))
 ```julia
 using DiskDataProviders, MLDataUtils, Flux
@@ -51,6 +55,7 @@ bw  = batchview(dataset) # This can now be used as a normal batchview
 x = first(bw)
 ```
 
+### Using LengthChannels (for light data)
 If preprocessing and data loading is cheap and fast, it may be advicable to instead make use of [LengthChannels](https://github.com/baggepinnen/LengthChannels.jl), example:
 ```julia
 using LengthChannels
@@ -85,22 +90,25 @@ dataset = batches(batchsize)
 ## Train the detector
 This package provides a selection of different flavors of autoencoders for use as event detectors. The current options are
 - `AutoEncoder`
+- `ResidualEncoder`
 - `VAE`
-Below is and example that trains an `AutoEncoder`. The argument to `AutoEncoder` controls the size of the model, bigger is bigger.
+Below is and example that trains an `AutoEncoder`. The argument to `AutoEncoder` controls the size of the model, bigger is bigger. Training of a `VAE` looks very similar, in fact, just switch `AutoEncoder` for `VAE` and change the `eltype` of `losses` to `Tuple{Float64, Float64}` (it stores both the reconstruction loss and the KL-div penalty.
 
 ```julia
 using Flux, BSON
 model = Detector.AutoEncoder(2, sparsify=true)
 Detector.encode(model,x) # This will give you the latent channels of x
-Detector.train(model, batchview(dataset), epochs=5) # Perform one epoch of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
+opt = AMSGrad(0.003)
+losses = Float32[]
+Detector.train(model, batchview(dataset), epochs=5, opt=opt, losses=losses) # Perform 5 epochs of training. This will take a long time, a figure will be displayed every now and then. This command can be executed several times
 # bson("detector.bson", model=cpu(model)) # Run this if you want to save your trained model
 ```
+The function `train` takes some keyword arguments to select how often to plot, save the model, and to control the plot appearance.
 
 To fine tune the detector, you may run a small number of epochs on a particular dataset of interest. Just make sure you apply the same input transformation to this dataset as you did for the training dataset, example:
 ```julia
 sound         = load_your_new_sound()
 newdataset    = Vector.(Iterators.partition(sound, 3second))[1:end-1] # remove the last datapoint as this is probably shorter
-model         = Detector.load_model()
 tunedataset   = dataset.transform.(newdataset)
 losses        = Detector.train(model, shuffle(tunedataset), epochs=1)
 ```

@@ -23,14 +23,18 @@ export encode, decode, autoencode, classify, ongpu, maybegpu
 
 include("train.jl")
 
-
-function load_model()
-    global model = BSON.load(joinpath(@__DIR__(),"../detector.bson"))[:model] |> gpu
-end
-
-
-
 save_interesting(inds, args...) = save_interesting(findall(inds), args...)
+
+"""
+    save_interesting(dataset, inds::Vector{Int}; contextwindow=1)
+
+Save interesting files to disc.
+
+#Arguments:
+- `dataset`: you data
+- `inds`: the indices of interesting files
+- `contextwindow`: how many files to save before and after an interesing file for context.
+"""
 function save_interesting(dataset, inds::Vector{Int}; contextwindow=1)
     tempdir = mktempdir()
     for ind ∈ inds
@@ -69,7 +73,14 @@ function feature_activations(model, dataset)
     reduce(hcat, F)
 end
 
+"""
+    abs_reconstruction_errors(model, dataset; th=0.7)
 
+Calculate the `th` quantile of absolute reconstruction errors.
+
+#Arguments:
+- `th`: Quantile ∈ (0,1)
+"""
 function abs_reconstruction_errors(model, dataset; th=0.70)
     e = map(dataset) do x
         x = x isa Tuple ? x[2] : x
@@ -90,16 +101,14 @@ function reconstruction_error(model, x::AbstractArray{<:Real})
     robust_error(X,Xh)|> cpu |> vec
 end
 
-function uncertainty(model, dataset; th=0.50)
-    e = map(dataset) do (X,Y)
-        Z = encode(model,X)[:,1,2,:] .|> exp |> cpu
-        map(eachcol(Z)) do ae
-            quantile(vec(ae), th)
-        end
-    end
-    reduce(vcat,e)
-end
+"""
+    M,U = means(model::VAE, dataset; th=0.5)
 
+Returns two features derived from the mean and uncertainty in the bottleneck of a VAE
+
+#Arguments:
+- `th`: Quantile ∈ (0,1) to summarize the feature vector per data point.
+"""
 function means(model, dataset; th=0.50)
     e = map(dataset) do (X,Y)
         Z = encode(model,X) |> cpu

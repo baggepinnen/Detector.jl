@@ -1,7 +1,4 @@
 
-# using Flux: identity
-const k = 20
-const k2 = 3
 
 # generic ======================================================================
 # function encode(model, X, sparsify)
@@ -12,7 +9,19 @@ const k2 = 3
 # end
 
 # const TrackedCuArray = TrackedArray{<:Any, <:Any, <:CuArray}
+
+"""
+    autoencode(model, x)
+
+Reconstruct `x` using `model`
+"""
 autoencode(model,x) = decode(model,encode(model, x))
+
+"""
+    classify(model::ResidualEncoder, x::Tuple)
+
+Use the classification part of the encoder to classify an input
+"""
 classify(model, x::Tuple) = classify(model, x[1])
 function classify(identityset)
     c = map(identityset) do (x,y,l)
@@ -21,7 +30,19 @@ function classify(identityset)
     vec(reduce(vcat, c))
 end
 # ongpu(m) = m[1].bias.identity isa CuArray
+
+"""
+    ongpu(model)
+
+Determine whether a model resides on the gpu or not.
+"""
 ongpu(m) = m[1].bias isa CuArray
+
+"""
+    maybegpu(model, x)
+
+Put `x` on the gpu if the model is on the gpu
+"""
 @inline maybegpu(model, x) = ongpu(model) ? gpu(x) : x
 @inline maybegpu(model, x::CuArray) = x
 # @inline maybegpu(model, x::TrackedCuArray) = x
@@ -35,6 +56,15 @@ end
 
 @inline maybegpu(model, xy::Tuple{Vararg{<:CuArray}}) = xy
 
+"""
+    loss(model, x, losses)
+
+Loss function specific to each kind of `model`.
+
+#Arguments:
+- `x`: Input
+- `losses`: A vector to store the loss value in, the eltype depends on the model.
+"""
 function loss(model, x, losses)
     X = maybegpu(model, x)
     loss(model, (X,X), losses)
@@ -203,6 +233,11 @@ function loss(model::AutoEncoder, xy::Tuple, losses)
 end
 
 
+"""
+    Z = encode(model, X)
+
+Encode `X` into the latent space `Z`
+"""
 function encode(model::AutoEncoder, X)
     X = maybegpu(model,X)
     X = reshape(X, size(X,1), 1, 1, :)
@@ -210,9 +245,19 @@ function encode(model::AutoEncoder, X)
     model.sparsify ? oneactive(Z) : Z
 end
 
+"""
+    Xh = decode(model, Z)
+
+Decode latent space representation `Z` to form reconstruction `Xh`
+"""
 decode(model::AutoEncoder, Z) = model.d(Z)
 
 
+"""
+    AutoEncoder(k; sparsify=true)
+
+`k` controls the size of the model, 1 is small, 20+ is large.
+"""
 function AutoEncoder(k; sparsify=true)
 
      # @require CuArrays="3a865a2d-5b23-5a0f-bc46-62713ec82fae"
@@ -256,6 +301,16 @@ end
 
 (m::ResidualEncoder)(x) = autoencode(m,x)
 
+"""
+    ResidualEncoder(k::Int, k2::Int; sparsify=true)
+
+Creates a `ResidualEncoder`. This model has a classifier as well as an autoencoder. `k` controls the size and `k2` must be chosen so that sizes of internal vectors lign up, you can determine this by trying to classify an input and observing the error message.
+
+#Arguments:
+- `k`: Size of model
+- `k2`: size of internal representation
+- `sparsify`: whether or not to sparsify the latent space of the autoencoder.
+"""
 function ResidualEncoder(k::Int, k2::Int; sparsify=true)
     ae = AutoEncoder(k; sparsify=sparsify)
     fc = Chain(
@@ -321,6 +376,16 @@ ongpu(m::VAE) = ongpu(m.e)
 
 (m::VAE)(x) = autoencode(m,x)
 
+"""
+    VAE(k::Int; c0=0.01, ci=0.001)
+
+Create a Variational Autoencoder.
+
+#Arguments:
+- `k`: Size of the model, 1 is small, 15+ is large.
+- `c0`: Initial KL penalty
+- `ci`: Increment to KL penalty per iteration. Caps at 1.
+"""
 function VAE(k::Int; c0=.01, ci=0.001)
     e = Chain(
             Conv((51,1), 1 =>4k, leakyrelu, pad=(0,0)),
@@ -358,6 +423,13 @@ function loss(model::VAE, xy::Tuple, losses)
     rl, model.c*kll
 end
 encode(model::VAE, X) = model.e(X)
+
+"""
+    decode(model::VAE, Z, noise=true)
+
+#Arguments:
+- `noise`: Whether or not to sample from the latent distribution or onlr propagate the mean.
+"""
 function decode(model::VAE, Z, noise=true)
     if noise
         Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1), size(Z,2), 1, size(Z,4)))
@@ -367,8 +439,22 @@ function decode(model::VAE, Z, noise=true)
     end
     model.d(Z)
 end
+
+"""
+    autoencode(model::VAE, x, noise=true) = begin
+
+DOCSTRING
+
+#Arguments:
+- `noise`: Whether or not to sample from the latent distribution or onlr propagate the mean.
+"""
 autoencode(model::VAE, x, noise=true) = decode(model, encode(model,x), noise)
 
+"""
+    kl(Z)
+
+Claculate the KL divergence penalty for latent space representation `Z` of a `VAE`
+"""
 function kl(Z)
     μ = Z[:,:,1,:]
     lσ = Z[:,:,2,:]
