@@ -24,14 +24,18 @@ function Base.summary(chain::Chain, x, level=0)
     end
 end
 
+function WAV.wavplay(path::AbstractString)
+    Threads.@spawn run(`totem $path`)
+end
+
 
 """
-    bp_filter(x, fs)
+    bp_filter(x, passband)
 
 Band-pass filter the sound
 """
-function bp_filter(x, fs)
-    responsetype = Bandpass(PASSBAND...; fs=fs) # NOTE: I reduced upper band stop to get away slightly from Nyquist freq
+function bp_filter(x, passband)
+    responsetype = Bandpass(passband...; fs=1) # NOTE: I reduced upper band stop to get away slightly from Nyquist freq
     designmethod = Butterworth(2)
     filt(digitalfilter(responsetype, designmethod), x)
 end
@@ -104,7 +108,7 @@ function auc(rocres::Vector{<:ROCNums})
     for xi in 1:length(fpr)-1
         auc += (fpr[xi]-fpr[xi+1])*mean(tpr[xi:xi+1])
     end
-    auc
+    round(auc, digits=3)
 end
 auc(args...) = auc(roc(args...))
 
@@ -115,7 +119,7 @@ auc(args...) = auc(roc(args...))
     xlabel-->"False positive rate"
     ylabel-->"True positive rate"
     label-->"AUC: $(round(auc(rocres), digits=4))"
-    @series fpr,tpr
+    @series false_positive_rate.(rocres), true_positive_rate.(rocres)
 end
 
 
@@ -322,7 +326,7 @@ MLBase.f1score(r::AbstractMatrix{<: Real}) = 2 / (1/precision(r) + 1/recall(r))
 """
     seconds2hms(s)
 
-Print hours minutes and seconds 
+Print hours minutes and seconds
 """
 function seconds2hms(s)
     h = s÷3600
