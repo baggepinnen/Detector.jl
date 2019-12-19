@@ -54,11 +54,15 @@ function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = los
                 l = loss(model, x, losses)
                 l isa Tuple ? +(l...) : l
             end
+            any(isnan, losses[end]) && error("Got NaN losses")
             Flux.Optimise.update!(opt, ps, gs)
             if i % plotinterval == 0
                 GC.gc()
-                plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...) |> display
+                @show losses[end]
+                plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...)
+                plot!(filtfilt(ones(plotinterval), [plotinterval], Matrix(losses))) |> display
             end
+
         end
         # Flux.testmode!(model, true)
 

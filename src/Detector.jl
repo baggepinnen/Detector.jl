@@ -85,7 +85,7 @@ function abs_reconstruction_errors(model, dataset; th=0.70)
     e = map(dataset) do x
         x = x isa Tuple ? x[2] : x
         X = maybegpu(model, reshape(x,:,1,1,size(x,4)))
-        Xh = model isa VAE ? autoencode(model,X,false) : autoencode(model,X)
+        Xh = model isa VAE ? autoencode(model,X,false)[1] : autoencode(model,X)
         ae = abs.(robust_error(X,Xh))
         map(eachcol(ae)) do ae
             quantile(cpu(vec(ae)), th)
@@ -102,28 +102,37 @@ function reconstruction_error(model, x::AbstractArray{<:Real})
 end
 
 """
-    M,U = means(model::VAE, dataset; th=0.5)
+    M,U,Σ,E = means(model::VAE, dataset; th=0.5)
 
-Returns two features derived from the mean and uncertainty in the bottleneck of a VAE
+Returns four features derived from the mean and variance in the bottleneck of a VAE, the predicted variance in the output and the reconstruction errors
 
 #Arguments:
 - `th`: Quantile ∈ (0,1) to summarize the feature vector per data point.
 """
 function means(model, dataset; th=0.50)
     e = map(dataset) do (X,Y)
-        Z = encode(model,X) |> cpu
-        m = abs.(Z[:,1,1,:])
-        s = Z[:,1,2,:]
+        Z = encode(model,X)
+        Zc = Z |> cpu
+        m = abs.(Zc[:,1,1,:])
+        s = Zc[:,1,2,:]
+        Xh,Σ = decode(model, Z)
         mv = map(eachcol(m)) do x
             quantile(vec(x), th)
         end
         sv = map(eachcol(s)) do x
             quantile(vec(x), th)
         end
-        mv,sv
+        sv2 = map(eachcol(cpu(exp.(Σ[:,1,1,:])))) do x
+            quantile(vec(x), th)
+        end
+        ae = abs.(robust_error(X,Xh))
+        ae = map(eachcol(ae)) do ae
+            quantile(cpu(vec(ae)), th)
+        end
+        mv,sv,sv2,ae
     end
     e = reduce(vcat,e)
-    reduce(vcat, first.(e)),reduce(vcat, Base.last.(e))
+    ntuple(i->reduce(vcat, getindex.(e,i)), length(e[1]))
 end
 
 """

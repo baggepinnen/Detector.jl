@@ -404,22 +404,26 @@ function VAE(k::Int; c0=.01, ci=0.001)
             BatchNorm(2k),
             ConvTranspose((11,1), 2k=>3k, leakyrelu, pad=(0,0), stride=2),
             BatchNorm(3k),
-            ConvTranspose((21,1),  3k=>4k, leakyrelu, pad=(0,0)),
+            ConvTranspose((21,1),  3k=>4k, tanh, pad=(0,0)),
             BatchNorm(4k),
-            ConvTranspose((54,1),  4k=>1,            pad=(0,0)))
-    VAE(e,d,Float32(c0),Float32(ci))
+            ConvTranspose((54,1),  4k=>2,            pad=(0,0)))
+    m = VAE(e,d,Float32(c0),Float32(ci))
+    m.d[end].bias[2] = 1
+    m.e[end].bias[2] = -2
+    m
 end
 
 function loss(model::VAE, xy::Tuple, losses)
-    X,Y = maybegpu(model, xy)
-    Z   = encode(model, X)
+    X,Y  = maybegpu(model, xy)
+    Z    = encode(model, X)
 
-    Xh  = decode(model, Z)
-    E   = robust_error(Y,Xh)
-    rl  = sum(abs2.(E)) / length(X)
-    kll = kl(Z) / length(X)
+    Xh,Σ = decode(model, Z)
+    E    = robust_error(Y,Xh)
+    # rl   = sum(abs2.(E)) / length(X)
+    rl   = varloss(E,Σ)
+    kll  = kl(Z)
     model.c = min(1, model.c + model.ci)
-    pushlog!(losses, (rl/var(Y), kll))
+    pushlog!(losses, (sum(abs2.(E)) / length(X) /var(Y), kll))
     rl, model.c*kll
 end
 encode(model::VAE, X) = model.e(X)
@@ -437,7 +441,8 @@ function decode(model::VAE, Z, noise=true)
     else
         Z = Z[:,:,1:1,:]
     end
-    model.d(Z)
+    XΣ = model.d(Z)
+    XΣ[:,:,1:1,:], XΣ[:,:,2:2,:]
 end
 
 """
@@ -459,7 +464,11 @@ function kl(Z)
     μ = Z[:,:,1,:]
     lσ = Z[:,:,2,:]
     # 0.5f0*(sum(abs2,μ) + sum(exp,lσ)) - sum(lσ)
-    0.5f0*sum(abs2.(μ) .+ exp.(lσ)) - sum(lσ)
+    (0.5f0*sum(abs2.(μ) .+ exp.(lσ)) - sum(lσ))/ length(μ)
+end
+
+function varloss(E,Σ)
+    (0.5f0*sum(abs2.(E)./(exp.(Σ) .+ 1f-2)) + sum(Σ))/length(E)
 end
 
 decode_kernel(Z1,Z2,r) = Z1 + sqrt(exp(Z2))*r
