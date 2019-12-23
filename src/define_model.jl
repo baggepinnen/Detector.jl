@@ -413,6 +413,38 @@ function VAE(k::Int; c0=.01, ci=0.001)
     m
 end
 
+function VAE2(k::Int; c0=.01, ci=0.001)
+    e = Chain(x->reshape(x,:,50,size(x,3),size(x,4)),
+            Conv((21,4), 1 =>4k, leakyrelu, stride=(2,1)),
+            BatchNorm(4k),
+            Conv((11,4), 4k=>3k, leakyrelu, stride=(2,1)),
+            BatchNorm(3k),
+            Conv((11,4), 3k=>2k, leakyrelu, stride=(2,1)),
+            BatchNorm(2k),
+            Conv((11,4), 2k=>1k, leakyrelu),
+            BatchNorm(1k),
+            Conv((11,4), 1k=>2),
+            # x->(println(size(x));x),
+            x->reshape(x,:,1,size(x,3),size(x,4)))
+    d = Chain(
+            x->reshape(x,:,35,size(x,3),size(x,4)),
+            ConvTranspose((11,4), 1=>1k, leakyrelu),
+            BatchNorm(1k),
+            ConvTranspose((11,4), 1k=>2k, leakyrelu),
+            BatchNorm(2k),
+            ConvTranspose((11,4), 2k=>3k, leakyrelu, stride=(2,1)),
+            BatchNorm(3k),
+            ConvTranspose((12,4),  3k=>4k, tanh, stride=(2,1)),
+            BatchNorm(4k),
+            ConvTranspose((26,4),  4k=>2, stride=(2,1)),
+            # x->reshape(@view(x[1:96000*size(x,3)*size(x,4)]),96000,1,size(x,3),size(x,4)))
+            x->reshape(x,:,1,size(x,3),size(x,4)))
+    m = VAE(e,d,Float32(c0),Float32(ci))
+    m.d[end-1].bias[2] = 2
+    m.e[end-1].bias[2] = -2
+    m
+end
+
 function loss(model::VAE, xy::Tuple, losses)
     X,Y  = maybegpu(model, xy)
     Z    = encode(model, X)

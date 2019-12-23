@@ -57,10 +57,12 @@ function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = los
             any(isnan, losses[end]) && error("Got NaN losses")
             Flux.Optimise.update!(opt, ps, gs)
             if i % plotinterval == 0
-                GC.gc()
+                GC.gc(true)
+                CuArrays.reclaim()
                 @show losses[end]
                 plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...)
-                plot!(filtfilt(ones(plotinterval), [plotinterval], Matrix(losses))) |> display
+                fl = clamp(plotinterval, 20,50)
+                plot!(filtfilt(ones(fl), [fl], Matrix(losses))) |> display
             end
 
         end
