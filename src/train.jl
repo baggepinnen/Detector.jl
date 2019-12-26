@@ -42,7 +42,7 @@ Trains a model.
 - `saveinterval`: Hhow often (epocs) to save a copy of the model to disk
 - `kwargs`: additional kwargs are used to control the plot.
 """
-function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = lossvec(model), plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
+function train(model, dataset; cb=()->(), epochs=10, α=0.002, opt = ADAM(α), losses = lossvec(model), plotinterval=length(dataset)÷2, saveinterval=max(epochs÷2,1), kwargs...)
     ps = Flux.params(model)
     # Flux.testmode!(model)
 
@@ -63,8 +63,8 @@ function train(model, dataset; epochs=10, α=0.002, opt = ADAM(α), losses = los
                 plot(Matrix(losses); legend=false, xlabel="Number of batches", kwargs...)
                 fl = clamp(plotinterval, 20,50)
                 plot!(filtfilt(ones(fl), [fl], Matrix(losses))) |> display
+                cb()
             end
-
         end
         # Flux.testmode!(model, true)
 

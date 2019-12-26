@@ -126,7 +126,7 @@ function vaefeatures(model, dataset; th=0.50)
         sv2 = map(eachcol(cpu(eΣ))) do x
             quantile(vec(x), th)
         end
-        E = robust_error(X,Xh)
+        E = robust_error(X[:,:,1:1,:],Xh)
         ae = abs.(E)
         ae = map(eachcol(ae)) do ae
             quantile(cpu(vec(ae)), th)
