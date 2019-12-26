@@ -55,6 +55,7 @@ function bootstrap_curve(emodel, truelabels, features, noisylabels)
         yh,a
     end
     yh,a = fiteval(noisylabels)
+    a < 0.5 && error("Initial AUC is really bad, this error is to prevent this function from taking forever to run O(N²)")
     curve = [a]
     Juno.@progress "Bootstrapping" for i in eachindex(truelabels)
         ind = most_uncertain_missing_label(givenlabels, yh)
