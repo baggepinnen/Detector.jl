@@ -1,0 +1,13 @@
+[deps]
+AdaptiveFilters = "c4f366c8-f60d-49ea-b3e5-386989159d04"
+BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
+CuArrays = "3a865a2d-5b23-5a0f-bc46-62713ec82fae"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+DecisionTree = "7806a523-6efd-50cb-b5f6-3fa6f1930dbb"
+Detector = "82ba68a1-f779-4cc2-aaaa-53af9af8d852"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+LengthChannels = "6e84ca90-c4c0-49b1-bdb7-24cdbeba32de"
+MonteCarloMeasurements = "0987c9cc-fe09-11e8-30f0-b96dd679fdca"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+UMAP = "c4f8c510-2410-5be4-91d7-4fbaeb39457e"
+WAV = "8149f6b0-98f6-5db9-b78f-408fbbb8ef88"
