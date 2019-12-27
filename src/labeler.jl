@@ -50,6 +50,7 @@ function bootstrap_curve(emodel, truelabels, features, noisylabels)
     givenlabels = Set{Int}()
     function fiteval(labels)
         DecisionTree.fit!(emodel,features,Int.(labels))
+        yh = DecisionTree.predict(emodel, features)
         yh = DecisionTree.predict_proba(emodel, features)[:,2]
         a = Detector.auc(truelabels,yh,sort(unique(yh)))
         yh,a
