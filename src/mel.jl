@@ -1,4 +1,4 @@
-fft_frequencies(samplerate::Real, nfft::Int) = LinRange(0f0, samplerate / 2f0, (nfft >> 1) + 1)
+fft_frequencies(fs::Real, nfft::Int) = LinRange(0f0, fs / 2f0, (nfft >> 1) + 1)
 
 
 """The Mel spectrogram"""
@@ -67,16 +67,16 @@ function mel_frequencies(nmels::Int = 128, fmin::Real = 0.0f0, fmax::Real = 1102
 end
 
 """
-    M = mel(samplerate::Real, nfft::Int, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = samplerate/2f0)
+    M = mel(fs::Real, nfft::Int, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = fs/2f0)
 
 Returns a Mel matrix `M` such that `M*f` is a mel spectrogram if `f` is a vector of spectrogram powers, e.g.,
 ```julia
 M*abs2.(rfft(sound))
 ```
 """
-function mel(samplerate::Real, nfft::Int, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = samplerate/2f0)
+function mel(fs::Real, nfft::Int, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = fs/2f0)
     weights = zeros(Float32, nmels, (nfft >> 1) + 1)
-    fftfreqs = fft_frequencies(samplerate, nfft)
+    fftfreqs = fft_frequencies(fs, nfft)
     melfreqs = mel_frequencies(nmels + 2, fmin, fmax)
     enorm = 2f0 ./ (melfreqs[3:end] - melfreqs[1:nmels])
 
@@ -90,22 +90,21 @@ function mel(samplerate::Real, nfft::Int, nmels::Int = 128, fmin::Real = 0f0, fm
     weights
 end
 
-function melspectrogram(audio, samplerate, windowsize::Int = 1024, hopsize::Int = windowsize >> 2;
-                        nmels::Int = 128, fmin::Real = 0f0, fmax::Real = samplerate / 2f0)
-    nfft = DSP.nextfastfft(windowsize)
-    S = spectrogram(audio, windowsize, hopsize).power
-    data = mel(samplerate, nfft, nmels, fmin, fmax) * S
+function melspectrogram(audio, fs, nfft::Int = 1024, hopsize::Int = nfft >> 2;
+                        nmels::Int = 128, fmin::Real = 0f0, fmax::Real = fs / 2f0)
+    S = DSP.spectrogram(audio, nfft, hopsize, fs=fs)
+    data = mel(fs, nfft, nmels, fmin, fmax) * S.power
     nframes = size(data, 2)
-    MelSpectrogram(data, LinRange(hz_to_mel(fmin)[1], hz_to_mel(fmax)[1], nmels), (0.0:nframes-1) * hopsize / samplerate)
+    MelSpectrogram(data, LinRange(hz_to_mel(fmin)[1], hz_to_mel(fmax)[1], nmels), S.time)
 end
 
-function mfcc(audio, samplerate, windowsize::Int = 1024, hopsize::Int = windowsize >> 2;
-              nmfcc::Int = 20, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = samplerate / 2f0)
+function mfcc(audio, fs, nfft::Int = 1024, hopsize::Int = nfft >> 2;
+              nmfcc::Int = 20, nmels::Int = 128, fmin::Real = 0f0, fmax::Real = fs / 2f0)
     if nmfcc >= nmels
         error("number of mfcc components should be less than the number of mel frequency bins")
     end
 
-    M = melspectrogram(audio, samplerate, windowsize, hopsize; nmels = nmels, fmin = fmin, fmax = fmax)
+    M = melspectrogram(audio, fs, nfft, hopsize; nmels = nmels, fmin = fmin, fmax = fmax)
     mfcc = dct(nmfcc, nmels) * power(M)
 
     for frame in 1:size(mfcc, 2)
@@ -125,4 +124,18 @@ function dct_matrix(nfilters::Int, ninput::Int)
 
     basis *= sqrt(2f0/ninput)
     basis
+end
+
+
+@recipe function mel(h::Detector.MelSpectrogram)
+    seriestype := :heatmap
+    xlabel --> "Time [s]"
+    ylabel --> "Frequency [Hz]"
+    # yticks --> yr
+    # xticks --> xr
+    title --> "Mel Spectrogram"
+    yscale := :log10
+    freqs = (Detector.mel_to_hz(h.mels)[2:end])
+
+    h.time, freqs, log.(h.power)[2:end,:]
 end
