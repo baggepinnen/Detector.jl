@@ -43,22 +43,38 @@ function most_uncertain_missing_label(l::Labeler, yh=innerfit(l))
 end
 
 
-function bootstrap_curve(emodel, truelabels, features, noisylabels)
+function bootstrap_curve(emodel, truelabels, features, noisylabels, N = length(truelabels); weightgain=2)
+    emodel = deepcopy(emodel)
     truelabels = copy(truelabels)
     features = copy(features)
     noisylabels = copy(noisylabels)
     givenlabels = Set{Int}()
+    weights = ones(Int,size(noisylabels))
     function fiteval(labels)
-        DecisionTree.fit!(emodel,features,Int.(labels))
-        yh = DecisionTree.predict(emodel, features)
-        yh = DecisionTree.predict_proba(emodel, features)[:,2]
-        a = Detector.auc(truelabels,yh,sort(unique(yh)))
+        if length(givenlabels) < length(noisylabels)
+            for ind in givenlabels
+                weights[ind] = weightgain
+            end
+        end
+        if eltype(noisylabels) <: Int
+            # try
+                DecisionTree.fit!(emodel,features,Int.(labels), weights)
+            # catch
+                # @show length(givenlabels)
+                # error()
+            # end
+            yh = DecisionTree.predict_proba(emodel, features)[:,2]
+        else
+            DecisionTree.fit!(emodel,features,labels, weights)
+            yh = DecisionTree.predict(emodel, features)
+        end
+        a = Detector.auc(round.(Int,truelabels),yh,sort(unique(yh)))
         yh,a
     end
     yh,a = fiteval(noisylabels)
-    a < 0.5 && error("Initial AUC is really bad, this error is to prevent this function from taking forever to run O(N²)")
+    a < 0.4 && error("Initial AUC is really bad, this error is to prevent this function from taking forever to run O(N²)")
     curve = [a]
-    Juno.@progress "Bootstrapping" for i in eachindex(truelabels)
+    Juno.@progress "Bootstrapping" for i in 1:N
         ind = most_uncertain_missing_label(givenlabels, yh)
         push!(givenlabels, ind)
         if noisylabels[ind] == truelabels[ind]
@@ -66,10 +82,12 @@ function bootstrap_curve(emodel, truelabels, features, noisylabels)
             continue
         end
         noisylabels[ind] = truelabels[ind]
-        yh,a = fiteval(noisylabels)
+        if i/N < 0.2 || (i % N÷20 == 0) # Don't refit so oftewn after the first 30%
+            yh,a = fiteval(noisylabels)
+        end
         push!(curve, a)
     end
-    curve
+    curve, emodel
 end
 
 function innerfit(l::Labeler)

@@ -415,7 +415,7 @@ end
 
 function VAE2(k::Int; c0=.01, ci=0.001)
     e = Chain(x->reshape(x,:,50,size(x,3),size(x,4)),
-            Conv((21,5), 2 =>4k, leakyrelu, pad=(10,2), dilation=(2,1)),
+            Conv((21,5), 1 =>4k, leakyrelu, pad=(10,2), dilation=(2,1)),
             BatchNorm(4k),
             Conv((11,5), 4k=>3k, leakyrelu, pad=(5,2), stride=(1,1)),
             BatchNorm(3k),

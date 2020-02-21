@@ -104,9 +104,11 @@ Use together with `MLBase.roc`.
 """
 function auc(rocres::Vector{<:ROCNums})
     fpr,tpr = false_positive_rate.(rocres), true_positive_rate.(rocres)
+    I = sortperm(fpr)
+    fpr,tpr = fpr[I], tpr[I]
     auc = 0.
     for xi in 1:length(fpr)-1
-        auc += (fpr[xi]-fpr[xi+1])*mean(tpr[xi:xi+1])
+        auc += (fpr[xi+1]-fpr[xi])*tpr[xi]
     end
     round(auc, digits=3)
 end
@@ -119,6 +121,7 @@ auc(args...) = auc(roc(args...))
     xlabel-->"False positive rate"
     ylabel-->"True positive rate"
     label-->"AUC: $(round(auc(rocres), digits=4))"
+    seriestype --> :steppre
     @series false_positive_rate.(rocres), true_positive_rate.(rocres)
 end
 
