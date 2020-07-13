@@ -36,7 +36,7 @@ end
 
 Determine whether a model resides on the gpu or not.
 """
-ongpu(m) = m[1].bias isa CuArray
+ongpu(m) = m[2].bias isa CuArray
 
 """
     maybegpu(model, x)
@@ -472,7 +472,11 @@ encode(model::VAE, X) = model.e(X)
 """
 function decode(model::VAE, Z, noise=true)
     if noise
-        Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1), size(Z,2), 1, size(Z,4)))
+        if ongpu(m)
+            Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], CuArrays.randn(Float32, size(Z,1), size(Z,2), 1, size(Z,4)))
+        else
+            Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:], randn(Float32, size(Z,1), size(Z,2), 1, size(Z,4)))
+        end
         # Z = decode_kernel.(Z[:,:,1:1,:], Z[:,:,2:2,:])
     else
         Z = Z[:,:,1:1,:]
